@@ -4,7 +4,7 @@ This tutorial describes the basics of TRGT and TRVZ tools.
 
 ## Prerequsites
 
-- [Tiny example dataset](https://github.com/PacificBiosciences/trgt/example/)
+- [Tiny example dataset](https://github.com/PacificBiosciences/trgt/tree/main/example)
   included in this repository
 - Recent versions of `samtools` and `bcftools`
 
@@ -79,7 +79,7 @@ Finally, let's visualize the repeat with the identifier "StrA" using TRVZ tool:
 
 TRVZ outputs two files `StrA.svg` and `StrA.png` that contain the same read
 pileup image in two file formats. Note that the SVG file can be directly edited
-in vector graphics editing software like [Inscape](https://inkscape.org/).
+in vector graphics editing software like [Inkscape](https://inkscape.org/).
 
 The resulting pileup plot shows the sequences of reads spanning each repeat
 allele (blue) and the surrounding flanking sequence (green):
