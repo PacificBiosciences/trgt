@@ -7,8 +7,8 @@ companion tool TRVZ for visualization of reads overlapping the repeats.
 
 ## Availability
 
-TRGT and TRVZ Linux binaries are available at the [releases](https://github.com/PacificBiosciences/trgt/releases) 
-page.
+- TRGT and TRVZ Linux binaries are [available here](https://github.com/PacificBiosciences/trgt/releases)
+- Repeat definition files are [available here](repeats/)
 
 ## Documentation
 
