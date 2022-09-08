@@ -11,54 +11,52 @@ tiny example dataset included in this repository.
 
 ## Overview of the input files
 
-Our example dataset consists of a reference genome (`reference.fasta`),
-a file with aligned reads (`sample.bam`), and a list of repeats (`repeats.bed`).
-The list of repeats is a BED file that, among other information, contains repeat
-coordinates, repeat identifiers, and motifs:
+Our example dataset consists of a reference genome (`reference.fasta`), a file
+with aligned reads (`sample.bam`), and the repeat definition file
+(`repeat.bed`). The repeat definitions are stored in a BED file that, among
+other information, contains repeat coordinates, repeat identifiers, and motifs:
 
 ```bash
-$ cat repeats.bed
-chrA   26039021        26039053        ID=chr10_26039021_26039053,STRUC=(TTTG)n
-chrA   26041338        26041362        ID=chr10_26041338_26041362,STRUC=(TTG)n
-chrA   26041683        26041699        ID=chr10_26041683_26041699,STRUC=(AAAC)n
+$ cat repeat.bed
+chrA    10000    10061    ID=TR1;MOTIFS=CAG;STRUC=(CAG)n
 ```
 
 ## Genotype repeats
 
-To genotype the repeats, run:
+To genotype the repeat, run:
 
 ```bash
-./trgt example/reference.fasta \
-       example/repeats.bed \
-       example/sample.bam \
-       sample
+./trgt --genome example/reference.fasta \
+       --repeats example/repeat.bed \
+       --reads example/sample.bam \
+       --output-prefix sample
 ```
 
-The output consists of files `sample.bcf` and `sample.spanning.bam`. The BCF
-file (which is the binary version of a VCF file) contains repeat genotypes while
-the BAM file contains pieces of HiFi reads that fully span the repeat sequences.
+The output consists of files `sample.vcf.gz` and `sample.spanning.bam`. The VCF
+file contains repeat genotypes while the BAM file contains pieces of HiFi reads
+that fully span the repeat sequences.
 
-For example, here is the first entry of the BCF file:
+For example, here is the first entry of the VCF file:
 
 ```bash
-$ bcftools view --no-header sample.bcf | head -n 1
-#CHROM POS ID REF ALT QUAL FILTER INFO FORMAT sample
-chrA    3001    .       CAGCAG  CAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAG,CAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAG  0       .       TRID=StrA;STRUC=(CAG)n  GT:MC:TSD:RM    1/2:30/40:29:.
+$ bcftools view --no-header sample.vcf.gz | head -n 1
+#CHROM  POS  ID  REF  ALT  QUAL  FILTER  INFO  FORMAT  sample
+chrA  10002  .  CAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAG  CAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAG,CAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAG  0  .  TRID=TR1;END=10061;MOTIFS=CAG;STRUC=(CAG)n  GT:AL:ALCI:SD:MC:MS:AP:AM  1/1:33,33:30-39,33-33:16,16:11,11:0(0-33),0(0-33):1,1:.,.
 ```
 
 It says that:
 
-- There is a tandem repeat starting at position 3001 of chrA
-- The reference sequence of this repeat is CAGCAG
-- This repeat has two non-reference alleles (spanning 30 and 40 CAGs)
+- There is a tandem repeat starting at position 10001 of chrA
+- The reference sequence of this repeat is CCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAG
+- This repeat has two alleles spanning 16 CAG motifs each
 
 ## Sort and index the outputs
 
-TRGT outputs are not sorted. So you need to sort and index the BCF:
+TRGT outputs are not sorted. So you need to sort and index the VCF:
 
 ```bash
-bcftools sort -Ob -o sample.sorted.bcf sample.bcf
-bcftools index sample.sorted.bcf
+bcftools sort -Ob -o sample.sorted.vcf.gz sample.vcf.gz
+bcftools index sample.sorted.vcf.gz
 ```
 
 and then the BAM:
@@ -72,21 +70,22 @@ And that's it! The output files are now ready for downstream analysis.
 
 ## Visualize a repeat
 
-To visualize the repeat with the identifier "StrA", run:
+To visualize the repeat with the identifier "TR1", run:
 
 ```bash
-./trvz example/reference.fasta \
-       example/repeats.bed \
-       sample.sorted.bcf \
-       sample.spanning.sorted.bam \
-       StrA
+./trvz --genome example/reference.fasta \
+       --repeats example/repeat.bed \
+       --vcf sample.sorted.vcf.gz \
+       --spanning-reads sample.spanning.sorted.bam \
+       --repeat-id TR1 \
+       --image TR1.svg
 ```
 
-TRVZ outputs two files `StrA.svg` and `StrA.png` that contain the same read
-pileup image in two file formats. Note that the SVG file can be directly edited
-in vector graphics editing software like [Inkscape](https://inkscape.org/).
+TRVZ outputs a file `TR1.svg` that contains the read pileup image. Note that the
+SVG file can be directly edited in vector graphics editing software like
+[Inkscape](https://inkscape.org/).
 
-The resulting pileup plot shows the sequences of reads spanning each repeat
+The resulting pileup plot shows the sequences of reads spanning each repeat 
 allele (blue) and the surrounding flanking sequence (green):
 
-![StrA read pileup](figures/StrA.png)
+![TR1 read pileup](figures/TR1.png)
