@@ -42,3 +42,8 @@ not contact a PacBio Field Applications Scientists or PacBio Customer Service
 for assistance with any TRGT release. Please report all issues through GitHub
 instead. We make no warranty that any such issue will be addressed, to any
 extent or within any time frame.
+
+## Full Changelog
+
+- 0.3.4
+  - Improved label spacing in TRVZ plots
