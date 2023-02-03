@@ -1,2 +1,7 @@
 *__pycache__*
 TRGT-HG002.vcf.gz
+tiny.db
+tiny.vcf
+dist
+build
+*.egg-info

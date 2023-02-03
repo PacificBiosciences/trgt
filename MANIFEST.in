@@ -1,0 +1,1 @@
+include trgt/database/schema.sql

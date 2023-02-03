@@ -7,7 +7,13 @@ import argparse
 
 import trgt
 from trgt.dbcmds import db_main
-from trgt.run import run_main
+#from trgt.run import run_main
+
+def run_main(args):
+    """
+    placeholder
+    """
+    print("Would run trgt executable")
 
 CMDS = {'run': run_main,
         'db': db_main}
