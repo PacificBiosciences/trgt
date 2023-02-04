@@ -3,6 +3,7 @@ DNA to bytes encoder/decoder
 """
 from io import BytesIO
 
+NUCS = ['A', 'G', 'C', 'T']
 def dna_encode(seq):
     """
     Turn a string of DNA to bytes
@@ -13,17 +14,8 @@ def dna_encode(seq):
         """
         ret = 0
         for pos, nuc in enumerate(seq):
-            pos = pos * 2
-            if nuc == 'A':
-                ret += 0 << pos
-            elif nuc == 'T':
-                ret += 3 << pos
-            elif nuc == 'C':
-                ret += 2 << pos
-            elif nuc == 'G':
-                ret += 1 << pos
-            else:
-                raise RuntimeError(f"Unrecognized nucleotide {nuc}")
+            pos *= 2
+            ret += NUCS.index(nuc) << pos
         return ret
 
     ret = BytesIO()
@@ -33,43 +25,18 @@ def dna_encode(seq):
     ret.seek(0)
     return ret.read()
 
-def dna_decode(bstr, m_len, comp=False):
+def dna_decode(bstr, m_len):
     """
     Turn bytes to string of DNA
-    comp will decode as the compliment
     """
-    def check_bits(val):
-        """
-        Checks first two bits of u8 for nucleotide
-        """
-        if val & 1:
-            if val & 2:
-                return 'T'
-            else:
-                return 'G'
-        elif val & 2:
-            return 'C'
-        
-        return 'A'
-
-    def miter(b):
+    def miter(b, m_len):
         """
         Iterates bytestring to yield nucleotides
         """
-        for i in b[:-1]:
-            if comp:
-                i = ~i
-            for _ in range(4):
-                yield check_bits(i)
-                i = i >> 2
-        # last byte might be padded
-        i = ~b[-1] if comp else b[-1]
-        pad_amt = m_len % 4
-        pad_amt = 4 if pad_amt == 0 else pad_amt
-        for _ in range(pad_amt):
-            yield check_bits(~i if comp else i)
-            i = i >> 2
-            pad_amt += 1
-
-    return "".join(miter(bstr))
+        for i in b:
+            for _ in range(min(4, m_len)):
+                yield NUCS[i & 3]
+                i >>=  2
+                m_len -= 1
+    return "".join(miter(bstr, m_len))
 
