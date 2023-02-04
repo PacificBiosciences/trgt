@@ -37,7 +37,7 @@ def pull_alleles(data):
     part1.columns = ["LocusID", "sequence", "spanning_reads"]
     part2 = data[["ID", "a2", "SD2"]]
     part2.columns = ["LocusID", "sequence", "spanning_reads"]
-    all_sap = pd.concat([part1, part2]).set_index(["LocusID", "sequence"]).join(aidx, how='left')
+    all_sap = pd.concat([part1, part2]).set_index(["LocusID", "sequence"]).join(aidx['allele_number'], how='left')
     all_sap["allele_number"] = all_sap['allele_number'].fillna(0)
     all_sap = all_sap.reset_index().drop(columns=['sequence'])
     return all_alleles.reset_index(drop=True), all_sap.reset_index(drop=True)
@@ -60,41 +60,34 @@ def create_main(args):
     if os.path.exists(args.dbname):
         raise RuntimeError(f"output {args.dbname} already exists")
 
+    os.mkdir(args.dbname)
+
     logging.info("Loading VCF")
     data = truvari.vcf_to_df(args.vcf, with_info=True, with_fmt=True, no_prefix=True, with_seqs=True)
     logging.info("Parsed %d Loci", len(data))
     data['ID'] = range(len(data))
 
-    con = duckdb.connect(database=args.dbname, read_only=False)
-    here = os.path.abspath(os.path.dirname(__file__))
-    with open(os.path.join(here, "schema.sql"), 'r') as fh:
-        con.execute(fh.read())
-
-    locus_df = data[["ID", "chrom", "start", "end"]]
-    con.execute("INSERT INTO Locus SELECT * FROM locus_df")
-
-    sample_name = pysam.VariantFile(args.vcf).header.samples[0]
-    con.execute(f"INSERT INTO Sample (SampleID, name) VALUES (0, '{sample_name}')")
+    l_fn = os.path.join(args.dbname, 'locus.pq')
+    data[["ID", "chrom", "start", "end"]].reset_index(drop=True).to_parquet(l_fn)
 
     logging.info("Wrangling Alleles")
     allele_df, sap_df = pull_alleles(data)
-    sap_df["SampleID"] = 0
-    #allele_df = allele_df[['LocusID', 'allele_number', 'allele_length', 'sequence']]
-    #sap_df = sap_df[["SampleID", "LocusID", "allele_number", "spanning_reads"]]
-    
+
+    sample_name = pysam.VariantFile(args.vcf).header.samples[0]
+    s_fn = os.path.join(args.dbname, f'sample.{sample_name}.pq')
+    sap_df[["LocusID", "allele_number", "spanning_reads"]].to_parquet(s_fn)
+
     logging.info("Encoding Alleles")
     allele_df['sequence'] = allele_df['sequence'].apply(trgt.dna_encode)
+    a_fn = os.path.join(args.dbname, f'allele.pq')
+    allele_df[['LocusID', 'allele_number', 'allele_length', 'sequence']].to_parquet(a_fn)
     logging.info("Parsed %d Alleles", len(allele_df))
 
-    con.execute("INSERT INTO Allele SELECT LocusID, allele_number, allele_length, sequence FROM allele_df")
-    con.execute("INSERT INTO SampleAlleleProperties SELECT SampleID, LocusID, allele_number, spanning_reads FROM sap_df")
-
+    logging.info("Creating DuckDB")
+    con = duckdb.connect(os.path.join(args.dbname, 'duck.db'))
+    con.execute(f"CREATE VIEW Locus AS SELECT * FROM read_parquet('{l_fn}')")
+    con.execute(f"CREATE VIEW Allele AS SELECT * FROM read_parquet('{a_fn}')")
+    con.execute(f"CREATE VIEW SampleAlleleProperties AS SELECT * FROM read_parquet('{s_fn}')")
     con.close()
-    logging.info("Finished DuckDB")
 
-    jl_out = {'l':locus_df, 's':sample_name, 'a':allele_df, 'sap':sap_df}
-    joblib.dump(jl_out, args.dbname + '.jl')
-    locus_df.to_parquet(args.dbname + '.l.pq')
-    allele_df.to_parquet(args.dbname + '.a.pq')
-    sap_df.to_parquet(args.dbname + '.s.pq')
-
+    logging.info("Finished")

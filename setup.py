@@ -31,5 +31,7 @@ setup(
         # truvari >= 4.0 -- needs to be cut
         "pysam>=0.15.2",
         "duckdb==0.6.1"
+        "pyarrow==11.0.0",
+        "fastparquet==2023.1.0"
     ],
 )
