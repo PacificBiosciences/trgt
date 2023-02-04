@@ -4,6 +4,7 @@ import argparse
 
 import pysam
 import duckdb
+import logging
 import truvari
 import pandas as pd
 
@@ -49,12 +50,15 @@ def create_main(args):
                         help="Output TRGT DB")
     args = parser.parse_args(args)
 
+    truvari.setup_logging()
     if not os.path.exists(args.vcf):
         raise RuntimeError(f"input {args.vcf} does not exist")
     if os.path.exists(args.dbname):
         raise RuntimeError(f"output {args.dbname} already exists")
 
+    logging.info("Loading VCF")
     data = truvari.vcf_to_df(args.vcf, with_info=True, with_fmt=True, no_prefix=True, with_seqs=True)
+    logging.info("Parsed %d VCF entries", len(data))
     data['ID'] = range(len(data))
 
     locus_df = data[["ID", "chrom", "start", "end"]]
@@ -68,9 +72,10 @@ def create_main(args):
 
     sample_name = pysam.VariantFile(args.vcf).header.samples[0]
     con.execute(f"INSERT INTO Sample (SampleID, name) VALUES (0, '{sample_name}')")
-
+    logging.info("Pulling Alleles")
     allele_df, sap_df = pull_alleles(data)
     con.execute("INSERT INTO Allele SELECT * FROM allele_df")
     con.execute("INSERT INTO SampleAlleleProperties SELECT * FROM sap_df")
 
     con.close()
+    logging.info("Finished")
