@@ -11,9 +11,9 @@ CREATE TABLE Sample (
 );
 
 CREATE TABLE Allele (
-  AlleleID INTEGER PRIMARY KEY,
   LocusID INTEGER,
-  allele_length INTEGER,
+  allele_number USMALLINT,
+  allele_length USMALLINT,
   /* FORMAT/MC, FORMAT/MS, FORMAT/AP */
   sequence BLOB,
 
@@ -22,11 +22,12 @@ CREATE TABLE Allele (
 
 CREATE TABLE SampleAlleleProperties (
   SampleID INTEGER,
-  AlleleID INTEGER,
-  spanning_reads INTEGER,
+  LocusID INTEGER,
+  allele_number USMALLINT,
+  spanning_reads USMALLINT,
 
   FOREIGN KEY (SampleID) REFERENCES Sample(SampleID),
-  FOREIGN KEY (AlleleID) REFERENCES Allele(AlleleID)
+  FOREIGN KEY (LocusID) REFERENCES Locus(LocusID),
 /*
   confidence_interval INTEGER,  AM 
 */

@@ -8,7 +8,6 @@ import trgt
 def test(seq):
     x = trgt.dna_encode(seq)
     y = trgt.dna_decode(x, len(seq))
-    # print(seq, x, y)
     assert seq == y, f"{seq} != {y}"
 
 def all_tests():

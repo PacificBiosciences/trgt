@@ -1,42 +1,46 @@
 import os
 import sys
 import argparse
+import joblib
 
 import pysam
 import duckdb
 import logging
 import truvari
+import numpy as np
 import pandas as pd
 
 import trgt
 
-def pull_alleles(data, sample_id=0):
+def pull_alleles(data):
     """
-    Builds rows for Alelle and SampleAlleleProperties tables
+    Turn alleles and their sample allele properties into tables
     """
-    allele_rows = []
-    sap_rows = []
+    alleles = pd.DataFrame(data["ALT"].to_list(), columns=["ALT1", "ALT2"], index=data.index)
+    sap = pd.DataFrame(data["SD"].to_list(), columns=["SD1", "SD2"], index=data.index)
 
-    allele_id = 0 # PRIMARY KEY
-    for idx, row in data.iterrows():
-        # For deduping alleles per-locus
-        cur_locus_alleles = {row['REF']: allele_id}
+    data = pd.concat([data, alleles, sap], axis=1)
 
-        allele_rows.append([allele_id, row["ID"], len(row['REF']), None])
+    data['a1'] = np.where(data['REF'] == data['ALT1'], None, data['ALT1'])
+    data['a2'] = np.where(data['REF'] == data['ALT2'], None, data['ALT2'])
+    part1 = data[['ID', 'a1']].dropna().copy()
+    part1.columns = ["LocusID", "sequence"]
+    part2 = data[['ID', 'a2']].dropna().copy()
+    part2.columns = ["LocusID", "sequence"]
+    all_alleles = pd.concat([part1, part2]).sort_values(["LocusID", "sequence"]).drop_duplicates()
+    all_alleles['allele_number'] = all_alleles.groupby('LocusID')['LocusID'].rank(method='first').astype(int)
+    all_alleles['allele_length'] = all_alleles['sequence'].str.len()
 
-        for idx, alt in enumerate(row["ALT"]):
-            if alt not in cur_locus_alleles:
-                allele_id += 1
-                cur_locus_alleles[alt] = allele_id
-                allele_rows.append([allele_id, row["ID"], len(alt), trgt.dna_encode(alt)])
-            sap_rows.append([sample_id, cur_locus_alleles[alt], row["SD"][idx]])
-        allele_id += 1
+    aidx = all_alleles.set_index(["LocusID", "sequence"])
 
-    allele_rows = pd.DataFrame(allele_rows, columns=["AlleleID", "LocusID", "allele_length", "sequence"])
-    sap_rows = pd.DataFrame(sap_rows, columns=["SampleID", "AlleleID", "spanning_reads"])
-
-    return allele_rows, sap_rows
-
+    part1 = data[["ID", "a1", "SD1"]]
+    part1.columns = ["LocusID", "sequence", "spanning_reads"]
+    part2 = data[["ID", "a2", "SD2"]]
+    part2.columns = ["LocusID", "sequence", "spanning_reads"]
+    all_sap = pd.concat([part1, part2]).set_index(["LocusID", "sequence"]).join(aidx, how='left')
+    all_sap["allele_number"] = all_sap['allele_number'].fillna(0)
+    all_sap = all_sap.reset_index().drop(columns=['sequence'])
+    return all_alleles.reset_index(drop=True), all_sap.reset_index(drop=True)
 
 def create_main(args):
     """
@@ -58,24 +62,39 @@ def create_main(args):
 
     logging.info("Loading VCF")
     data = truvari.vcf_to_df(args.vcf, with_info=True, with_fmt=True, no_prefix=True, with_seqs=True)
-    logging.info("Parsed %d VCF entries", len(data))
+    logging.info("Parsed %d Loci", len(data))
     data['ID'] = range(len(data))
-
-    locus_df = data[["ID", "chrom", "start", "end"]]
 
     con = duckdb.connect(database=args.dbname, read_only=False)
     here = os.path.abspath(os.path.dirname(__file__))
     with open(os.path.join(here, "schema.sql"), 'r') as fh:
         con.execute(fh.read())
 
+    locus_df = data[["ID", "chrom", "start", "end"]]
     con.execute("INSERT INTO Locus SELECT * FROM locus_df")
 
     sample_name = pysam.VariantFile(args.vcf).header.samples[0]
     con.execute(f"INSERT INTO Sample (SampleID, name) VALUES (0, '{sample_name}')")
-    logging.info("Pulling Alleles")
+
+    logging.info("Wrangling Alleles")
     allele_df, sap_df = pull_alleles(data)
-    con.execute("INSERT INTO Allele SELECT * FROM allele_df")
-    con.execute("INSERT INTO SampleAlleleProperties SELECT * FROM sap_df")
+    sap_df["SampleID"] = 0
+    #allele_df = allele_df[['LocusID', 'allele_number', 'allele_length', 'sequence']]
+    #sap_df = sap_df[["SampleID", "LocusID", "allele_number", "spanning_reads"]]
+    
+    logging.info("Encoding Alleles")
+    allele_df['sequence'] = allele_df['sequence'].apply(trgt.dna_encode)
+    logging.info("Parsed %d Alleles", len(allele_df))
+
+    con.execute("INSERT INTO Allele SELECT LocusID, allele_number, allele_length, sequence FROM allele_df")
+    con.execute("INSERT INTO SampleAlleleProperties SELECT SampleID, LocusID, allele_number, spanning_reads FROM sap_df")
 
     con.close()
-    logging.info("Finished")
+    logging.info("Finished DuckDB")
+
+    jl_out = {'l':locus_df, 's':sample_name, 'a':allele_df, 'sap':sap_df}
+    joblib.dump(jl_out, args.dbname + '.jl')
+    locus_df.to_parquet(args.dbname + '.l.pq')
+    allele_df.to_parquet(args.dbname + '.a.pq')
+    sap_df.to_parquet(args.dbname + '.s.pq')
+
