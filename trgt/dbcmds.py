@@ -4,6 +4,7 @@ import trgt.database as tdb
 
 CMDS = {
     "create": ("Create a TRGTDB", tdb.create_main),
+    "query": ("Query a TRGTDB", tdb.query_main)
 }
 
 USAGE = "TRGT db commands:\n" + "\n".join([f"    {k:9} {t[0]}" for k,t in CMDS.items()])

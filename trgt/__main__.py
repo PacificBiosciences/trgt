@@ -7,7 +7,6 @@ import argparse
 
 import trgt
 from trgt.dbcmds import db_main
-#from trgt.run import run_main
 
 def run_main(args):
     """
