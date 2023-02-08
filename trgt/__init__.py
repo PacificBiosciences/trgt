@@ -6,4 +6,5 @@ from trgt.bdna import (
 from trgt.database.dbutils import (
     get_tdb_files,
     tdb_to_pd,
+    vcf_to_tdb,
 )

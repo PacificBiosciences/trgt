@@ -3,11 +3,12 @@ import argparse
 import trgt.database as tdb
 
 CMDS = {
-    "create": ("Create a TRGTDB", tdb.create_main),
-    "query": ("Query a TRGTDB", tdb.query_main)
+    "create": ("Create a TRGTdb", tdb.create_main),
+    "query": ("Query a TRGTdb", tdb.query_main),
+    "append": ("Append a VCF/TRGTDB to an existing TRGTdb", tdb.append_main)
 }
 
-USAGE = "TRGT db commands:\n" + "\n".join([f"    {k:9} {t[0]}" for k,t in CMDS.items()])
+USAGE = "commands:\n" + "\n".join([f"    {k:9} {t[0]}" for k,t in CMDS.items()])
 
 def db_main(args):
     """
