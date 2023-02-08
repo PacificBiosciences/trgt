@@ -17,9 +17,7 @@ def allele_count(dbname):
     allele_count = allele_count.set_index(["LocusID", "allele_number"])
 
     for samp_name, samp_data in data['sample'].items():
-        num_samps = data['sample']['HG002_30x.GRCh38.deepvariant.haplotagged']\
-                        .reset_index().groupby(["LocusID", "allele_number"]).size()
-        num_samps.name = 'allele_count'
+        num_samps = data['sample'][samp_name].reset_index().groupby(["LocusID", "allele_number"]).size()
         allele_count["allele_count"] += num_samps
 
     allele_count = allele_count.reset_index()

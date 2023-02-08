@@ -13,39 +13,80 @@ import trgt
 
 def pull_alleles(data):
     """
-    Turn alleles and their sample allele properties into tables
+    Turn alleles into a table
     """
     alleles = pd.DataFrame(data["ALT"].to_list(), columns=["ALT1", "ALT2"], index=data.index)
-    sap = pd.DataFrame(data["SD"].to_list(), columns=["SD1", "SD2"], index=data.index)
+    gt = pd.DataFrame(data["GT"].to_list(), columns=["GT1", "GT2"], index=data.index)
+    alleles = pd.concat([data[["LocusID", "REF"]], alleles, gt], axis=1)
+    alleles = alleles.melt(id_vars=["LocusID", "REF", "ALT1", "ALT2"], value_vars=["GT1", "GT2"], value_name="allele_number")
 
-    data = pd.concat([data, alleles, sap], axis=1)
+    def seq_chooser(x):
+        """
+        What sequence does the genotype point to
+        """
+        if x["allele_number"] == 0:
+            return x["REF"]
+        if x["allele_number"] == 1:
+            return x["ALT1"]
+        if x["allele_number"] == 2:
+            return x["ALT2"]
 
-    # Split VCF line alleles and dedup
-    data['a1'] = np.where(data['REF'] == data['ALT1'], None, data['ALT1'])
-    data['a2'] = np.where(data['REF'] == data['ALT2'], None, data['ALT2'])
-    part1 = data[['LocusID', 'a1']].dropna().rename(columns={'a1':'sequence'})
-    part2 = data[['LocusID', 'a2']].dropna().rename(columns={'a2':'sequence'})
-    all_alleles = pd.concat([part1, part2], ignore_index=True).sort_values(["LocusID", "sequence"]).drop_duplicates()
-    all_alleles['allele_number'] = all_alleles.groupby('LocusID')['LocusID'].rank(method='first')
-    all_alleles['allele_length'] = all_alleles['sequence'].str.len()
-    # Adding reference allele
-    partr = data[["LocusID"]].copy()
-    partr["allele_number"] = 0
-    partr["allele_length"] = data["end"] - data["start"]
-    all_alleles = pd.concat([all_alleles, partr], ignore_index=True)
-    all_alleles['allele_number'] = all_alleles['allele_number'].astype(int)
+    alleles['sequence'] = alleles.apply(seq_chooser, axis=1)
+    alleles = alleles.drop(columns=["REF", "ALT1", "ALT2", "variable"])
+    alleles.insert(2, "allele_length", alleles['sequence'].str.len())
+    return alleles
 
-    # allele number lookup
-    aidx = all_alleles.set_index(["LocusID", "sequence"])
+def pull_saps(data):
+    """
+    Turn sample allele properties into a table
+    """
+    gt = pd.DataFrame(data["GT"].to_list(), columns=["GT1", "GT2"], index=data.index)
+    span = pd.DataFrame(data["SD"].to_list(), columns=["SD1", "SD2"], index=data.index)
+    alci = pd.DataFrame(data["ALCI"].to_list(), columns=["ALCI1", "ALCI2"], index=data.index)
+    sap = pd.concat([data[["LocusID"]], span, alci, gt], axis=1)
 
-    # Split VCF line sample allele properties and tie to their allele number
-    part1 = data[["LocusID", "a1", "SD1"]].rename(columns={'a1':"sequence", "SD1":"spanning_reads"})
-    part2 = data[["LocusID", "a2", "SD2"]].rename(columns={'a2':"sequence", "SD2":"spanning_reads"})
-    all_sap = pd.concat([part1, part2]).set_index(["LocusID", "sequence"]).join(aidx['allele_number'], how='left')
-    # all_sap["allele_number"] = all_sap['allele_number'].fillna(0).astype(int)
-    all_sap = all_sap.reset_index().drop(columns=['sequence'])
+    renamer = {"SD1": "spanning_reads", "SD2": "spanning_reads",
+               "ALCI1":"ALCI", "ALCI2":"ALCI", "GT1":"allele_number", "GT2":"allele_number"}
+    sap1 = sap[["LocusID", "GT1", "SD1", "ALCI1"]].rename(columns=renamer)
+    sap2 = sap[["LocusID", "GT2", "SD2", "ALCI2"]].rename(columns=renamer)
+    sap = pd.concat([sap1, sap2], axis=0)
+    sap[["ALCI_lower", "ALCI_upper"]] = sap["ALCI"].str.split('-', expand=True).astype(int)
+    sap = sap.drop(columns=["ALCI"])
+    return sap.reset_index(drop=True)
 
-    return all_alleles.reset_index(drop=True), all_sap
+def vcf_to_tdb(vcf_fn, dbname):
+    """
+    Turn a vcf into a TRGT database
+    """
+    if not os.path.exists(vcf_fn):
+        raise RuntimeError(f"input {vcf_fn} does not exist")
+    if os.path.exists(dbname):
+        raise RuntimeError(f"output {dbname} already exists")
+
+    os.mkdir(dbname)
+
+    logging.info("Loading VCF")
+    data = truvari.vcf_to_df(vcf_fn, with_info=True, with_fmt=True, no_prefix=True, with_seqs=True)
+    logging.info("Parsed %d Loci", len(data))
+    data['LocusID'] = range(len(data))
+
+    pq_fns = trgt.get_tdb_files(dbname)
+    data[["LocusID", "chrom", "start", "end"]].reset_index(drop=True).to_parquet(pq_fns['locus'])
+
+    logging.info("Wrangling Alleles")
+    allele_df = pull_alleles(data)
+    logging.info("Encoding Alleles")
+    allele_df['sequence'] = allele_df[~allele_df['sequence'].isna()]['sequence'].apply(trgt.dna_encode)
+    a_fn = os.path.join(dbname, f'allele.pq')
+    allele_df.to_parquet(pq_fns['allele'])
+    logging.info("Parsed %d Alleles", len(allele_df))
+
+    logging.info("Pulling Sample Information")
+    sap_df = pull_saps(data)
+    sample_name = pysam.VariantFile(vcf_fn).header.samples[0]
+    s_fn = os.path.join(dbname, f'sample.{sample_name}.pq')
+    sap_df.to_parquet(s_fn)
+    
 
 def create_main(args):
     """
@@ -60,33 +101,5 @@ def create_main(args):
     args = parser.parse_args(args)
 
     truvari.setup_logging()
-    if not os.path.exists(args.vcf):
-        raise RuntimeError(f"input {args.vcf} does not exist")
-    if os.path.exists(args.dbname):
-        raise RuntimeError(f"output {args.dbname} already exists")
-
-    os.mkdir(args.dbname)
-
-    logging.info("Loading VCF")
-    data = truvari.vcf_to_df(args.vcf, with_info=True, with_fmt=True, no_prefix=True, with_seqs=True)
-    logging.info("Parsed %d Loci", len(data))
-    data['LocusID'] = range(len(data))
-
-    pq_fns = trgt.get_tdb_files(args.dbname)
-    data[["LocusID", "chrom", "start", "end"]].reset_index(drop=True).to_parquet(pq_fns['locus'])
-
-    logging.info("Wrangling Alleles")
-    allele_df, sap_df = pull_alleles(data)
-
-    sample_name = pysam.VariantFile(args.vcf).header.samples[0]
-    s_fn = os.path.join(args.dbname, f'sample.{sample_name}.pq')
-    sap_df[["LocusID", "allele_number", "spanning_reads"]].to_parquet(s_fn)
-
-    logging.info("Encoding Alleles")
-    allele_df['sequence'] = allele_df[~allele_df['sequence'].isna()]['sequence'].apply(trgt.dna_encode)
-    #np.where(allele_df['sequence'].isna(), None, allele_df['sequence'].apply(trgt.dna_encode)
-    a_fn = os.path.join(args.dbname, f'allele.pq')
-    allele_df[['LocusID', 'allele_number', 'allele_length', 'sequence']].to_parquet(pq_fns['allele'])
-    logging.info("Parsed %d Alleles", len(allele_df))
-
+    vcf_to_tdb(args.vcf, args.dbname)
     logging.info("Finished")

@@ -18,7 +18,6 @@ def get_tdb_files(dbname):
 
     return {'locus': l_fn, 'allele': a_fn, 'sample': s_dict}
 
-
 def tdb_to_pd(dbname):
     """
     Loads  files into dataframes

@@ -1,5 +1,9 @@
 """ database commands """
-from trgt.database.create import create_main
+from trgt.database.create import (
+    create_main,
+    vcf_to_tdb
+)
+
 from trgt.database.query import query_main
 
 __all__ = [
