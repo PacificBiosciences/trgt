@@ -1,10 +1,11 @@
 from trgt.bdna import (
-    dna_encode,
-    dna_decode
+    dna_decode,
+    dna_encode
 )
 
 from trgt.database.dbutils import (
     get_tdb_files,
-    tdb_to_pd,
+    get_tdb_samplename,
+    load_tdb,
     vcf_to_tdb,
 )
