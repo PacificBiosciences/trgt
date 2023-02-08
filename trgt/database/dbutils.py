@@ -3,10 +3,12 @@ Utilities for interacting with a trgt database
 """
 import os
 import glob
+import math
 import logging
 
 import pysam
 import truvari
+import numpy as np
 import pandas as pd
 
 import trgt
@@ -45,6 +47,23 @@ def load_tdb(dbname):
     for samp, fn in names['sample'].items():
         ret['sample'][samp] = pd.read_parquet(fn)
     return ret
+
+def dump_tdb(data, output):
+    """
+    Write tdb data to output folder. output folder must already exist.
+
+    WARNING: will overwrite existing data
+    """
+    if not os.path.exists(output):
+        os.mkdir(output)
+    pq_fns = get_tdb_files(output)
+    # We have options here
+    # See https://stackoverflow.com/questions/35789412/spark-sql-difference-between-gzip-vs-snappy-vs-lzo-compression-formats
+    # And help(df.to_parquet)
+    data['locus'].to_parquet(pq_fns['locus'], index=False, compression='gzip')
+    data['allele'].to_parquet(pq_fns['allele'], index=False, compression='gzip')
+    for sample, value in data['sample'].items():
+        value.to_parquet(os.path.join(output, f"sample.{sample}.pq"), index=False, compression='gzip')
 
 def pull_alleles(data):
     """
@@ -95,36 +114,37 @@ def vcf_to_tdb(vcf_fn):
     """
     if not os.path.exists(vcf_fn):
         raise RuntimeError(f"input {vcf_fn} does not exist")
-    if os.path.exists(dbname):
-        raise RuntimeError(f"output {dbname} already exists")
 
     ret = {}
-
     logging.info("Loading VCF %s", vcf_fn)
     data = truvari.vcf_to_df(vcf_fn, with_info=True, with_fmt=True, no_prefix=True, with_seqs=True)
     logging.info("Parsed %d loci", len(data))
-    data['LocusID'] = range(len(data))
+    data["LocusID"] = range(len(data))
 
-    ret['locus'] = data[["LocusID", "chrom", "start", "end"]].reset_index(drop=True).copy()
+    ret["locus"] = data[["LocusID", "chrom", "start", "end"]].reset_index(drop=True).copy()
 
     logging.info("Wrangling alleles")
     allele_df = pull_alleles(data)
     logging.info("Encoding alleles")
     allele_df['sequence'] = allele_df[~allele_df['sequence'].isna()]['sequence'].apply(trgt.dna_encode)
-    allele_df.to_parquet(pq_fns['allele'])
+    ret["allele"] = allele_df
     logging.info("Parsed %d alleles", len(allele_df))
 
     logging.info("Pulling sample information")
+    # Todo: multi-sample VCFs
+    # for sample in pysam.VariantFile(vcf_fn).header.samples: sap_df = pull_saps(data, sample)
     sap_df = pull_saps(data)
     sample_name = pysam.VariantFile(vcf_fn).header.samples[0]
-    s_fn = os.path.join(dbname, f'sample.{sample_name}.pq')
-    sap_df.to_parquet(s_fn)
+    ret['sample'] = {sample_name: sap_df}
+    return ret
 
 def tdb_combine(exist_db, new_db):
     """
-    Combine two tdbs
+    Combine two tdbs. returns new in-memory tdb
     """
     # Join Locus tables
+    ret = {}
+
     logging.info("Consolidating loci")
     el = exist_db["locus"].set_index(["chrom", "start", "end"])
     nl = new_db["locus"].set_index(["chrom", "start", "end"])
@@ -136,7 +156,8 @@ def tdb_combine(exist_db, new_db):
     union["LocusID_new"] = union["LocusID_new"].fillna(-1).astype(int)
     union["LocusID"] = union["LocusID"].astype(int)
     # Safe to write this out now
-    new_locus = union.reset_index()[["LocusID", "chrom", "start", "end"]]
+    new_locus = union.reset_index()[["LocusID", "chrom", "start", "end"]].copy()
+    ret['locus'] = new_locus
     logging.info("Total of %d loci", len(new_locus))
 
     # Will need to update the other tables' LocusID
@@ -167,9 +188,11 @@ def tdb_combine(exist_db, new_db):
     union = new_allele.dropna(subset="allele_number_new").copy()
     new_allele["allele_number"] = new_allele["n_an"]
     # Write new_allele[["LocusID", "allele_number", "allele_length", "sequence"]]
+    ret['allele'] = new_allele[["LocusID", "allele_number", "allele_length", "sequence"]].copy()
     logging.info("Total of %d alleles", len(new_allele))
 
     # Pass the new allele numbers to the new_db's sample
+    # TODO - multi-sample
     logging.info("Consolidating sample information")
     union["allele_number_new"] = union["allele_number_new"].astype(int)
     lookup = (union[["LocusID", "allele_number_new", "n_an"]]
@@ -178,4 +201,8 @@ def tdb_combine(exist_db, new_db):
     nsi = new_db["sample"][sample_name].set_index(["LocusID", "allele_number"])
     new_sample = nsi.join(lookup, how='left').reset_index()
     new_sample["allele_number"] = new_sample["n_an"].fillna(new_sample["allele_number"]).astype(int)
-    # Write new_sample[["LocusID", "allele_number", "spanning_reads", "ALCI_lower", "ALCI_upper"]]
+    
+    ret['sample'] = exist_db['sample']
+    sid = list(new_db['sample'].keys())[0] # Single sample only..
+    ret['sample'][sid] = new_sample[["LocusID", "allele_number", "spanning_reads", "ALCI_lower", "ALCI_upper"]].copy()
+    return ret

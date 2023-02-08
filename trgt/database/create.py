@@ -1,5 +1,6 @@
 import os
 import sys
+import logging
 import argparse
 
 import pysam
@@ -12,7 +13,7 @@ def get_sample(file):
     Gets the sample name from vcf or tdb inputs
     """
     if file.endswith((".vcf", ".vcf.gz")):
-        return pysam.VariantFile(vcf_fn).header.samples[0]
+        return pysam.VariantFile(file).header.samples[0]
     return trgt.get_tdb_samplename(file)       
 
 def check_args(args):
@@ -20,6 +21,11 @@ def check_args(args):
     Preflight checks on arguments. Returns True if there is a problem
     """
     check_fail = False
+
+    if os.path.exists(args.output):
+        logging.error(f"output {args.output} already exists")
+        check_fail = True
+
     seen_samples = {}
     for i in args.inputs:
         if not os.path.exists(i):
@@ -49,24 +55,16 @@ def create_main(args):
     args = parser.parse_args(args)
 
     truvari.setup_logging()
-    if os.path.exists(args.output):
-        logging.error(f"output {dbname} already exists")
-        sys.exit(1)
-    
     if check_args(args):
         logging.error("cannot create database. exiting")
         sys.exit(1)
 
     logging.info("Loading %d files", len(args.inputs))
     m_data = None
-    for i in inputs:
-        n_data = trgt.load_tdb(i) if inputs[0].endswith(".tdb") else trgt.vcf_to_tdb(i)
+    for i in args.inputs:
+        n_data = trgt.load_tdb(i) if i.endswith(".tdb") else trgt.vcf_to_tdb(i)
         m_data = n_data if m_data is None else trgt.tdb_combine(m_data, n_data)
 
-    pq_fns = get_tdb_files(dbname)
     logging.info("Writing parquet files")
-    m_data['locus'].to_parquet(pq_fns['locus'])
-    m_data['allele'].to_parquet(pq_fns['allele'])
-    for sample, value in m_data['sample'].items():
-        value.to_parquet(os.path.join(dbname, f"sample.{sample}.pq"))
+    trgt.dump_tdb(m_data, args.output)
     logging.info("Finished")

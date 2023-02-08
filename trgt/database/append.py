@@ -2,36 +2,46 @@
 Add new VCF to existing database
 """
 import os
-import argparse
-import pandas as pd
-import truvari
 import logging
+import argparse
+import truvari
+
 import trgt
-import numpy as np
-import math
+
+def check_args(args):
+    """
+    Preflight checks on arguments. Returns True if there is a problem
+    """
+    check_fail = False
+    if not os.path.exists(args.to):
+        logging.error(f"output {args.to} does not exists")
+        check_fail = True
+    if not os.path.exists(args.fr):
+        logging.error(f"input {args.fr} does not exist")
+        check_fail = True
+    return check_fail
 
 def append_main(args):
     """
-    Create a new database and fill it with a VCF
+    Add new vcf or trgt.db to an existing one
     """
-    parser = argparse.ArgumentParser(prog="trgt db create", description=__doc__,
+    parser = argparse.ArgumentParser(prog="trgt db append", description=__doc__,
                             formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("dbname", metavar="DB", type=str,
-                        help="Existing TRGT DB")
-    parser.add_argument("vcf", metavar="VCF", type=str,
-                        help="Input TRGT VCF")
+    # these could be positional arguments, but a little bit of user friction
+    # will help prevent unintentional overwriting
+    parser.add_argument("--to", metavar="DB", type=str,
+                        help="Existing DB to pull into")
+    parser.add_argument("--fr", metavar="FR", type=str,
+                        help="Input vcf or db to pull from")
     args = parser.parse_args(args)
     truvari.setup_logging()
 
-    if not os.path.exists(args.dbname):
-        raise RuntimeError(f"output {args.dbname} does not exists")
-    if not os.path.exists(args.vcf):
-        raise RuntimeError(f"input {args.vcf} does not exist")
+    if check_args(args):
+        logging.error("cannot append to database. exiting")
+        sys.exit(1)
 
-    tmp_name = truvari.make_temp_filename(suffix=".tdb")
-    trgt.vcf_to_tdb(args.vcf, tmp_name)
-    new_db = trgt.tdb_to_pd(tmp_name)
-    exist_db = trgt.tdb_to_pd(args.dbname)
-
-    tdb_combine()
+    exist_db = trgt.tdb_to_pd(args.to)
+    new_db = trgt.load_tdb(args.fr) if args.fr.endswith(".tdb") else trgt.vcf_to_tdb(args.fr)
+    result = trgt.tdb_combine(exist_db, new_db)
+    trgt.dump_tdb(result, args.to)
     logging.info("Finished")
