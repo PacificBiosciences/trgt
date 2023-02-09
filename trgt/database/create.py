@@ -8,13 +8,13 @@ import truvari
 
 import trgt
 
-def get_sample(file):
+def get_samples(file):
     """
     Gets the sample name from vcf or tdb inputs
     """
     if file.endswith((".vcf", ".vcf.gz")):
         return pysam.VariantFile(file).header.samples[0]
-    return trgt.get_tdb_samplename(file)       
+    return trgt.get_tdb_samplenames(file)       
 
 def check_args(args):
     """
@@ -38,10 +38,10 @@ def check_args(args):
             logging.error("expected .vcf .vcf.gz or .tdb")
             check_fail = True
         else: # can only check sample of valid file names
-            samp = get_sample(i)
-            if samp in seen_samples:
-                logging.error(f"input {i} has redundant sample with {seen_samples[i]}")
-            seen_samples[samp] = i
+            for s in get_samples(i):
+                if s in seen_samples:
+                    logging.error(f"input {i} has redundant sample with {seen_samples[i]}")
+                seen_samples[s] = i
     return check_fail
 
 def create_main(args):

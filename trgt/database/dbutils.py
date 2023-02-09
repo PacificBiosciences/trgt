@@ -14,11 +14,12 @@ import pandas as pd
 import trgt
 
 
-def get_tdb_samplename(file):
+def get_tdb_samplenames(file):
     """
     Parses the sample name from a tdb sample parquet files
     """
-    return os.path.basename(file)[len('sample.'):-len('.pq')]
+    for i in glob.glob(os.path.join(file, "sample.*.pq")):
+        yield os.path.basename(i)[len('sample.'):-len('.pq')]
 
 def get_tdb_files(dbname):
     """
@@ -27,7 +28,7 @@ def get_tdb_files(dbname):
     l_fn = os.path.join(dbname, 'locus.pq')
     a_fn = os.path.join(dbname, 'allele.pq')
     s_files = glob.glob(os.path.join(dbname, 'sample.*.pq'))
-    s_names = [get_tdb_samplename(_) for _ in s_files]
+    s_names = [get_tdb_samplenames(_) for _ in s_files]
     s_dict = dict(zip(s_names, s_files))
 
     return {'locus': l_fn, 'allele': a_fn, 'sample': s_dict}
