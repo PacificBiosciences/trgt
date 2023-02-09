@@ -18,8 +18,10 @@ def get_tdb_samplenames(file):
     """
     Parses the sample name from a tdb sample parquet files
     """
+    ret = []
     for i in glob.glob(os.path.join(file, "sample.*.pq")):
-        yield os.path.basename(i)[len('sample.'):-len('.pq')]
+        ret.append(os.path.basename(i)[len('sample.'):-len('.pq')])
+    return ret
 
 def get_tdb_files(dbname):
     """
@@ -28,7 +30,7 @@ def get_tdb_files(dbname):
     l_fn = os.path.join(dbname, 'locus.pq')
     a_fn = os.path.join(dbname, 'allele.pq')
     s_files = glob.glob(os.path.join(dbname, 'sample.*.pq'))
-    s_names = [get_tdb_samplenames(_) for _ in s_files]
+    s_names = get_tdb_samplenames(dbname)
     s_dict = dict(zip(s_names, s_files))
 
     return {'locus': l_fn, 'allele': a_fn, 'sample': s_dict}
@@ -124,14 +126,14 @@ def vcf_to_tdb(vcf_fn):
     ret["locus"] = data[["LocusID", "chrom", "start", "end"]].reset_index(drop=True).copy()
 
     logging.info("Wrangling alleles")
-    allele_df = pull_alleles(data, encode=True)
+    allele_df = pull_alleles(data, encode=False)
     ret["allele"] = allele_df
     logging.info("allele count:\t%d", len(allele_df))
 
     logging.info("Pulling samples")
     ret["sample"] = {}
     gt_count = 0
-    for sample in pysam.VariantFile(vcf_fn).header.samples: 
+    for sample in pysam.VariantFile(vcf_fn).header.samples:
         ret['sample'][sample] = pull_saps(data, sample)
         gt_count += len(ret['sample'][sample])
     logging.info("genotype count:\t%d", gt_count)
@@ -179,9 +181,8 @@ def consol_allele(exist_db, new_db, consol_locus):
         l_val = x.iloc[0]["allele_number"]
         l_val = int(x.iloc[0]["allele_number_new"]) if math.isnan(l_val) else int(l_val)
         return np.arange(l_val, l_val + len(x), dtype='int')
-    new_allele["n_an"] = (np.hstack(new_allele.groupby(["LocusID"])
-                            .apply(allele_num_consolidate))
-                            .astype(int))
+    new_allele["n_an"] = np.hstack(new_allele.groupby(["LocusID"]).apply(allele_num_consolidate))
+
     new_allele["allele_length"] = (new_allele["allele_length"]
                                     .fillna(new_allele["allele_length_new"])
                                     .astype(int))
@@ -189,7 +190,7 @@ def consol_allele(exist_db, new_db, consol_locus):
     allele_lookup = new_allele.dropna(subset="allele_number_new").copy()
     new_allele["allele_number"] = new_allele["n_an"]
     ret = new_allele[["LocusID", "allele_number", "allele_length", "sequence"]].copy()
-    
+
     allele_lookup["allele_number_new"] = allele_lookup["allele_number_new"].astype(int)
     allele_lookup = (allele_lookup[["LocusID", "allele_number_new", "n_an"]]
                         .rename(columns={"allele_number_new":"allele_number"})
