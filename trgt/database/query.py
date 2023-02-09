@@ -9,7 +9,7 @@ def allele_count(dbname):
     """
     Locus - allele number - allele count
     """
-    data = trgt.tdb_to_pd(dbname)
+    data = trgt.load_tdb(dbname)
 
     # For a single sample, get how many times an allele is found
     allele_count = data['allele'][["LocusID", "allele_number"]].copy()
@@ -23,7 +23,7 @@ def allele_count(dbname):
     allele_count = allele_count.reset_index()
     view = data['locus'].join(allele_count, on='LocusID', rsuffix="_")
     view['allele_count'] = view['allele_count'].fillna(0)
-    view[["chrom", "start", "end", "allele_number", "allele_count"]].to_csv('/dev/stdout', index=False)
+    view[["chrom", "start", "end", "allele_number", "allele_count"]].to_csv('/dev/stdout', sep='\t', index=False)
 
 def allele_seqs(dbname):
     """
@@ -34,13 +34,40 @@ def allele_seqs(dbname):
     deseq = lambda x: trgt.dna_decode(x['sequence'], x['allele_length'])
     alleles['sequence'] = alleles[~alleles["sequence"].isna()].apply(deseq, axis=0)
     # Need fasta fetching for reference alleles
-    alleles[["LocusID", "allele_number", "sequence"]].dropna().to_csv("/dev/stdout", index=False)
+    alleles[["LocusID", "allele_number", "sequence"]].dropna().to_csv("/dev/stdout", sep='\t', index=False)
+
+def monz_ref(dbname):
+    """
+    monozygotic reference per-sample and overall
+    """
+    data = trgt.load_tdb("family.tdb")
+
+    out_table = []
+    for samp,table in data["sample"].items():
+        table["is_ref"] = table["allele_number"] == 0
+        out_table.append([samp,
+                          table["LocusID"].nunique(),
+                          table.groupby(["LocusID"])["is_ref"].all().sum()
+                         ])
+
+    # loci that are monozygotic across all samples
+    all_sap = pd.concat(data["sample"].values())
+    all_sap["is_ref"] = all_sap["allele_number"] == 0
+    out_table.append(['all',
+                      len(data['locus']),
+                      all_sap.groupby(["LocusID"])["is_ref"].all().sum()
+                     ])
+
+    out_table = pd.DataFrame(out_table, columns=["sample", "loci", "mon_ref"])
+    out_table['pct'] = out_table['mon_ref'] / out_table['loci']
+    out_table.to_csv('/dev/stdout', sep='\t', index=False)
 
 QS = {
-    'ac': ("Locus - allele number - allele count", allele_count),
-    'as': ("Locus - allele sequence", allele_seqs),
+    "ac": ("Locus - allele number - allele count", allele_count),
+    "as": ("Locus - allele number - allele sequence", allele_seqs),
+    "monref": ("How many loci are monozygotic reference", monz_ref),
     # genotypes,
-    # copy numbers
+    # copy numbers...?
 }
 
 USAGE = "TRGT queries:\n" + "\n".join([f"    {k:9} {t[0]}" for k,t in QS.items()])
@@ -57,16 +84,3 @@ def query_main(args):
                         help="TRGT db name")
     args = parser.parse_args(args)
     QS[args.query][1](args.dbname)
-
-"""
-these are operations on all the data
-we'll have them for everything we 'load' i.e. columns from VCF that are pulled during 'create'
-
-But we won't make them for anything 'derived' e.g. if we make the MotifCount table described elsewhere
-allele_length ---
---region / --Region (I got this logic somewhere)
-
-Would need the sample.*pq
-spanning_reads --- 
---samples (inline csv or a file)
-"""
