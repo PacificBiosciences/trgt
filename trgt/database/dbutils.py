@@ -89,6 +89,7 @@ def dump_tdb(data, output):
     set_tdb_types(data)
     # We have options here
     # See https://stackoverflow.com/questions/35789412/spark-sql-difference-between-gzip-vs-snappy-vs-lzo-compression-formats
+    # Possibly https://arrow.apache.org/docs/python/generated/pyarrow.parquet.ParquetWriter.html
     # And help(df.to_parquet)
     data['locus'].to_parquet(pq_fns['locus'], index=False, compression='gzip')
     data['allele'].to_parquet(pq_fns['allele'], index=False, compression='gzip')
