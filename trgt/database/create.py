@@ -13,7 +13,7 @@ def get_samples(file):
     Gets the sample name from vcf or tdb inputs
     """
     if file.endswith((".vcf", ".vcf.gz")):
-        return pysam.VariantFile(file).header.samples[0]
+        return list(pysam.VariantFile(file).header.samples)
     return trgt.get_tdb_samplenames(file)       
 
 def check_args(args):
