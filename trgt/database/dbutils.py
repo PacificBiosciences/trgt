@@ -65,7 +65,7 @@ def dump_tdb(data, output):
     for sample, value in data['sample'].items():
         value.to_parquet(os.path.join(output, f"sample.{sample}.pq"), index=False, compression='gzip')
 
-def pull_alleles(data):
+def pull_alleles(data, encode=False):
     """
     Turn alleles into a table
     """
@@ -82,9 +82,13 @@ def pull_alleles(data):
                     .drop_duplicates(subset=["LocusID", "sequence"]))
     alleles["allele_length"] = alleles["sequence"].str.len()
     alleles.loc[alleles["allele_number"] == 0, "sequence"] = None
-    return (alleles.sort_values(["LocusID", "allele_number"])
-            [["LocusID", "allele_number", "allele_length", "sequence"]]
-            .reset_index(drop=True))
+    alleles = (alleles.sort_values(["LocusID", "allele_number"])
+                    [["LocusID", "allele_number", "allele_length", "sequence"]]
+                    .reset_index(drop=True))
+    if encode:
+        alleles['sequence'] = alleles[~alleles['sequence'].isna()]['sequence'].apply(trgt.dna_encode)
+
+    return alleles
 
 def pull_saps(data, sample):
     """
@@ -112,56 +116,55 @@ def vcf_to_tdb(vcf_fn):
         raise RuntimeError(f"input {vcf_fn} does not exist")
 
     ret = {}
-    logging.info("Loading VCF %s", vcf_fn)
     data = truvari.vcf_to_df(vcf_fn, with_info=True, with_fmt=True, alleles=True)
-    logging.info("Parsed %d loci", len(data))
+    logging.info("locus count:\t%d", len(data))
     data["LocusID"] = range(len(data))
 
     ret["locus"] = data[["LocusID", "chrom", "start", "end"]].reset_index(drop=True).copy()
 
     logging.info("Wrangling alleles")
-    allele_df = pull_alleles(data)
-    logging.info("Encoding alleles")
-    allele_df['sequence'] = allele_df[~allele_df['sequence'].isna()]['sequence'].apply(trgt.dna_encode)
+    allele_df = pull_alleles(data, encode=True)
     ret["allele"] = allele_df
-    logging.info("Parsed %d alleles", len(allele_df))
+    logging.info("allele count:\t%d", len(allele_df))
 
-    logging.info("Pulling sample information")
+    logging.info("Pulling samples")
     ret["sample"] = {}
+    gt_count = 0
     for sample in pysam.VariantFile(vcf_fn).header.samples: 
         ret['sample'][sample] = pull_saps(data, sample)
+        gt_count += len(ret['sample'][sample])
+    logging.info("genotype count:\t%d", gt_count)
     return ret
 
-def tdb_combine(exist_db, new_db):
+def locus_consolidator(exist_db, new_db):
     """
-    Combine two tdbs. returns new in-memory tdb
+    Consolidate Locus tables
     """
-    # Join Locus tables
-    ret = {}
-
-    logging.info("Consolidating loci")
     el = exist_db["locus"].set_index(["chrom", "start", "end"])
     nl = new_db["locus"].set_index(["chrom", "start", "end"])
     union = el.join(nl, rsuffix='_new', how='outer').sort_values("LocusID")
 
-    # Need new LocusIDs for anything that exists in the new but not in the original
+    # Need new LocusIDs for anything that exists in new but not in original
     new_ids = np.array(range(len(el), len(el) + int(union["LocusID"].isna().sum())))
-    union["LocusID"] = np.hstack([union[~union["LocusID"].isna()]["LocusID"].values, np.array(new_ids)])
-    union["LocusID_new"] = union["LocusID_new"].fillna(-1).astype(int)
+    union["LocusID"] = (np.hstack([union[~union["LocusID"].isna()]["LocusID"].values,
+                        np.array(new_ids)]))
+    union["LocusID_new"] = (union["LocusID_new"]
+                            .fillna(-1)
+                            .astype(int))
     union["LocusID"] = union["LocusID"].astype(int)
-    # Safe to write this out now
-    new_locus = union.reset_index()[["LocusID", "chrom", "start", "end"]].copy()
-    ret['locus'] = new_locus
-    logging.info("Total of %d loci", len(new_locus))
+    ret = union.reset_index()[["LocusID", "chrom", "start", "end"]].copy()
+    return ret, union
 
-    # Will need to update the other table's LocusID
-    new_locusids = dict(zip(union["LocusID_new"], union["LocusID"]))
+def consol_allele(exist_db, new_db, consol_locus):
+    """
+    Consolidate allele tables
+    """
+    new_locusids = dict(zip(consol_locus["LocusID_new"], consol_locus["LocusID"]))
     new_db["allele"]["LocusID"] = new_db["allele"]["LocusID"].map(new_locusids)
-    for sample, table in new_db["sample"]:
+
+    for sample, table in new_db["sample"].items():
         table["LocusID"] = table["LocusID"].map(new_locusids)
 
-    # Join allele tables
-    logging.info("Consolidating alleles")
     ea = exist_db["allele"].set_index(["LocusID", "sequence"])
     na = new_db["allele"].set_index(["LocusID", "sequence"])
     new_allele = (ea.join(na, rsuffix='_new', how='outer')
@@ -170,30 +173,61 @@ def tdb_combine(exist_db, new_db):
                     .drop_duplicates())
 
     # Identical Locus/sequence will use existing allele_numbers
-    # New alleles in the locus will need next available allele_numbers
+    # New alleles will need next available allele_numbers
     def allele_num_consolidate(x):
         l_val = x.iloc[0]["allele_number"]
         l_val = int(x.iloc[0]["allele_number_new"]) if math.isnan(l_val) else int(l_val)
         return np.arange(l_val, l_val + len(x), dtype='int')
-    new_allele["n_an"] = np.hstack(new_allele.groupby(["LocusID"]).apply(allele_num_consolidate)).astype(int)
-    new_allele["allele_length"] = new_allele["allele_length"].fillna(new_allele["allele_length_new"]).astype(int)
+    new_allele["n_an"] = (np.hstack(new_allele.groupby(["LocusID"])
+                            .apply(allele_num_consolidate))
+                            .astype(int))
+    new_allele["allele_length"] = (new_allele["allele_length"]
+                                    .fillna(new_allele["allele_length_new"])
+                                    .astype(int))
     # hold this for samples
-    union = new_allele.dropna(subset="allele_number_new").copy()
+    allele_lookup = new_allele.dropna(subset="allele_number_new").copy()
     new_allele["allele_number"] = new_allele["n_an"]
-    # Write new_allele[["LocusID", "allele_number", "allele_length", "sequence"]]
-    ret['allele'] = new_allele[["LocusID", "allele_number", "allele_length", "sequence"]].copy()
-    logging.info("Total of %d alleles", len(new_allele))
+    ret = new_allele[["LocusID", "allele_number", "allele_length", "sequence"]].copy()
+    
+    allele_lookup["allele_number_new"] = allele_lookup["allele_number_new"].astype(int)
+    allele_lookup = (allele_lookup[["LocusID", "allele_number_new", "n_an"]]
+                        .rename(columns={"allele_number_new":"allele_number"})
+                        .set_index(["LocusID", "allele_number"])["n_an"])
 
-    # Pass the new allele numbers to the new_db's sample
-    logging.info("Consolidating sample information")
-    ret['sample'] = exist_db['sample']
-    union["allele_number_new"] = union["allele_number_new"].astype(int)
-    lookup = (union[["LocusID", "allele_number_new", "n_an"]]
-                .rename(columns={"allele_number_new":"allele_number"})
-                .set_index(["LocusID", "allele_number"])["n_an"])
+    return ret, allele_lookup
+
+def consol_sample(exist_db, new_db, allele_lookup):
+    """
+    Consolidate sample tables
+    """
+    ret = exist_db['sample']
+    gt_count = len(exist_db['sample'])
+
+    # Update new_db's allele numbers
     for sample, table in new_db["sample"].items():
-        nsi = table.set_index(["LocusID", "allele_number"])
-        new_sample = nsi.join(lookup, how='left').reset_index()
+        new_sample = (table.set_index(["LocusID", "allele_number"])
+                        .join(allele_lookup, how='left')
+                        .reset_index())
         new_sample["allele_number"] = new_sample["n_an"].fillna(new_sample["allele_number"]).astype(int)
-        ret['sample'][sample] = new_sample[["LocusID", "allele_number", "spanning_reads", "ALCI_lower", "ALCI_upper"]].copy()
+        gt_count += len(new_sample)
+        ret[sample] = new_sample[["LocusID", "allele_number", "spanning_reads", "ALCI_lower", "ALCI_upper"]].copy()
+    return ret, gt_count
+
+def tdb_combine(exist_db, new_db):
+    """
+    Combine two tdbs. returns new in-memory tdb
+    """
+    ret = {}
+    logging.info("Consolidating loci")
+    ret["locus"], consol_locus = locus_consolidator(exist_db, new_db)
+    logging.info("locus count:\t%d", len(ret['locus']))
+
+    logging.info("Consolidating alleles")
+    ret["allele"], allele_lookup = consol_allele(exist_db, new_db, consol_locus)
+    logging.info("allele count:\t%d", len(ret["allele"]))
+
+    logging.info("Consolidating samples")
+    ret['sample'], gt_count = consol_sample(exist_db, new_db, allele_lookup)
+    logging.info("genotype count:\t%d", gt_count)
+
     return ret

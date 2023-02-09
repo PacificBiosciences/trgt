@@ -16,8 +16,15 @@ def check_args(args):
     if not os.path.exists(args.to):
         logging.error(f"output {args.to} does not exists")
         check_fail = True
+    if not args.to.endswith(".tdb"):
+        logging.error(f"output {args.to} must end with `.tdb`")
+        check_fail = True
     if not os.path.exists(args.fr):
         logging.error(f"input {args.fr} does not exist")
+        check_fail = True
+    if not args.fr.endswith((".vcf", ".vcf.gz", ".tdb")):
+        logging.error("unrecognized file extension on {i}")
+        logging.error("expected .vcf .vcf.gz or .tdb")
         check_fail = True
     return check_fail
 
