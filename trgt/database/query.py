@@ -9,7 +9,7 @@ def allele_count(dbname):
     """
     Locus - allele number - allele count
     """
-    data = trgt.tdb_to_pd(dbname)
+    data = trgt.load_tdb(dbname)
 
     # For a single sample, get how many times an allele is found
     allele_count = data['allele'][["LocusID", "allele_number"]].copy()
@@ -38,9 +38,9 @@ def allele_seqs(dbname):
 
 QS = {
     'ac': ("Locus - allele number - allele count", allele_count),
-    'as': ("Locus - allele sequence", allele_seqs),
+    'as': ("Locus - allele number - allele sequence", allele_seqs),
     # genotypes,
-    # copy numbers
+    # copy numbers...?
 }
 
 USAGE = "TRGT queries:\n" + "\n".join([f"    {k:9} {t[0]}" for k,t in QS.items()])

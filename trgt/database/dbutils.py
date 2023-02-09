@@ -69,34 +69,30 @@ def pull_alleles(data):
     """
     Turn alleles into a table
     """
-    alleles = pd.DataFrame(data["ALT"].to_list(), columns=["ALT1", "ALT2"], index=data.index)
-    gt = pd.DataFrame(data["GT"].to_list(), columns=["GT1", "GT2"], index=data.index)
-    alleles = pd.concat([data[["LocusID", "REF"]], alleles, gt], axis=1)
-    alleles = alleles.melt(id_vars=["LocusID", "REF", "ALT1", "ALT2"], value_vars=["GT1", "GT2"], value_name="allele_number")
+    alleles = (pd.DataFrame(data["alleles"].to_list(), index=data.index)
+               .reset_index()
+               .melt(id_vars='hash', value_name="sequence")
+               .drop(columns="variable")
+               .dropna()
+               .set_index('hash'))
+    alleles["LocusID"] = data["LocusID"]
+    alleles["allele_number"] = alleles.groupby(["LocusID"]).cumcount()
+    alleles = (alleles.sort_values(["LocusID", "allele_number"])
+                    .reset_index(drop=True)
+                    .drop_duplicates(subset=["LocusID", "sequence"]))
+    alleles["allele_length"] = alleles["sequence"].str.len()
+    alleles.loc[alleles["allele_number"] == 0, "sequence"] = None
+    return (alleles.sort_values(["LocusID", "allele_number"])
+            [["LocusID", "allele_number", "allele_length", "sequence"]]
+            .reset_index(drop=True))
 
-    def seq_chooser(x):
-        """
-        What sequence does the genotype point to
-        """
-        if x["allele_number"] == 0:
-            return x["REF"]
-        if x["allele_number"] == 1:
-            return x["ALT1"]
-        if x["allele_number"] == 2:
-            return x["ALT2"]
-
-    alleles['sequence'] = alleles.apply(seq_chooser, axis=1)
-    alleles = alleles.drop(columns=["REF", "ALT1", "ALT2", "variable"])
-    alleles.insert(2, "allele_length", alleles['sequence'].str.len())
-    return alleles
-
-def pull_saps(data):
+def pull_saps(data, sample):
     """
     Turn sample allele properties into a table
     """
-    gt = pd.DataFrame(data["GT"].to_list(), columns=["GT1", "GT2"], index=data.index)
-    span = pd.DataFrame(data["SD"].to_list(), columns=["SD1", "SD2"], index=data.index)
-    alci = pd.DataFrame(data["ALCI"].to_list(), columns=["ALCI1", "ALCI2"], index=data.index)
+    gt = pd.DataFrame(data[f"{sample}_GT"].to_list(), columns=["GT1", "GT2"], index=data.index)
+    span = pd.DataFrame(data[f"{sample}_SD"].to_list(), columns=["SD1", "SD2"], index=data.index)
+    alci = pd.DataFrame(data[f"{sample}_ALCI"].to_list(), columns=["ALCI1", "ALCI2"], index=data.index)
     sap = pd.concat([data[["LocusID"]], span, alci, gt], axis=1)
 
     renamer = {"SD1": "spanning_reads", "SD2": "spanning_reads",
@@ -117,7 +113,7 @@ def vcf_to_tdb(vcf_fn):
 
     ret = {}
     logging.info("Loading VCF %s", vcf_fn)
-    data = truvari.vcf_to_df(vcf_fn, with_info=True, with_fmt=True, no_prefix=True, with_seqs=True)
+    data = truvari.vcf_to_df(vcf_fn, with_info=True, with_fmt=True, alleles=True)
     logging.info("Parsed %d loci", len(data))
     data["LocusID"] = range(len(data))
 
@@ -131,11 +127,9 @@ def vcf_to_tdb(vcf_fn):
     logging.info("Parsed %d alleles", len(allele_df))
 
     logging.info("Pulling sample information")
-    # Todo: multi-sample VCFs
-    # for sample in pysam.VariantFile(vcf_fn).header.samples: sap_df = pull_saps(data, sample)
-    sap_df = pull_saps(data)
-    sample_name = pysam.VariantFile(vcf_fn).header.samples[0]
-    ret['sample'] = {sample_name: sap_df}
+    ret["sample"] = {}
+    for sample in pysam.VariantFile(vcf_fn).header.samples: 
+        ret['sample'][sample] = pull_saps(data, sample)
     return ret
 
 def tdb_combine(exist_db, new_db):
@@ -160,12 +154,11 @@ def tdb_combine(exist_db, new_db):
     ret['locus'] = new_locus
     logging.info("Total of %d loci", len(new_locus))
 
-    # Will need to update the other tables' LocusID
+    # Will need to update the other table's LocusID
     new_locusids = dict(zip(union["LocusID_new"], union["LocusID"]))
     new_db["allele"]["LocusID"] = new_db["allele"]["LocusID"].map(new_locusids)
-    # Assume there's only one sample
-    sample_name = list(new_db["sample"].keys())[0]
-    new_db["sample"][sample_name]["LocusID"] = new_db["sample"][sample_name]["LocusID"].map(new_locusids)
+    for sample, table in new_db["sample"]:
+        table["LocusID"] = table["LocusID"].map(new_locusids)
 
     # Join allele tables
     logging.info("Consolidating alleles")
@@ -192,17 +185,15 @@ def tdb_combine(exist_db, new_db):
     logging.info("Total of %d alleles", len(new_allele))
 
     # Pass the new allele numbers to the new_db's sample
-    # TODO - multi-sample
     logging.info("Consolidating sample information")
+    ret['sample'] = exist_db['sample']
     union["allele_number_new"] = union["allele_number_new"].astype(int)
     lookup = (union[["LocusID", "allele_number_new", "n_an"]]
                 .rename(columns={"allele_number_new":"allele_number"})
                 .set_index(["LocusID", "allele_number"])["n_an"])
-    nsi = new_db["sample"][sample_name].set_index(["LocusID", "allele_number"])
-    new_sample = nsi.join(lookup, how='left').reset_index()
-    new_sample["allele_number"] = new_sample["n_an"].fillna(new_sample["allele_number"]).astype(int)
-    
-    ret['sample'] = exist_db['sample']
-    sid = list(new_db['sample'].keys())[0] # Single sample only..
-    ret['sample'][sid] = new_sample[["LocusID", "allele_number", "spanning_reads", "ALCI_lower", "ALCI_upper"]].copy()
+    for sample, table in new_db["sample"].items():
+        nsi = table.set_index(["LocusID", "allele_number"])
+        new_sample = nsi.join(lookup, how='left').reset_index()
+        new_sample["allele_number"] = new_sample["n_an"].fillna(new_sample["allele_number"]).astype(int)
+        ret['sample'][sample] = new_sample[["LocusID", "allele_number", "spanning_reads", "ALCI_lower", "ALCI_upper"]].copy()
     return ret
