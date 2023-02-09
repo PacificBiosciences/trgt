@@ -51,6 +51,32 @@ def load_tdb(dbname):
         ret['sample'][samp] = pd.read_parquet(fn)
     return ret
 
+def set_tdb_types(d):
+    """
+    Sets tdb datatypes of table columns in place
+    """
+    l_types = {"LocusID": np.uint32,
+               "chrom": str,
+               "start": np.uint32,
+               "end": np.uint32
+               }
+    a_types = {"LocusID": np.uint32,
+               "allele_number": np.uint16,
+               "allele_length": np.uint16,
+               "sequence": np.bytes_
+               }
+    s_types = {"LocusID": np.uint32,
+               "allele_number": np.uint16,
+               "spanning_reads": np.uint16,
+               "ALCI_lower": np.uint16,
+               "ALCI_upper": np.uint16}
+    d['locus'] = d['locus'].astype(l_types)
+
+    d['allele'] = d['allele'].astype(a_types)
+
+    for samp, val in d['sample'].items():
+        d['sample'][samp] = val.astype(s_types)
+
 def dump_tdb(data, output):
     """
     Write tdb data to output folder. output folder must already exist.
@@ -60,6 +86,7 @@ def dump_tdb(data, output):
     if not os.path.exists(output):
         os.mkdir(output)
     pq_fns = get_tdb_files(output)
+    set_tdb_types(data)
     # We have options here
     # See https://stackoverflow.com/questions/35789412/spark-sql-difference-between-gzip-vs-snappy-vs-lzo-compression-formats
     # And help(df.to_parquet)
@@ -89,6 +116,7 @@ def pull_alleles(data, encode=False):
                     [["LocusID", "allele_number", "allele_length", "sequence"]]
                     .reset_index(drop=True))
     if encode:
+        alleles['sequence'] = alleles['sequence'].where(~alleles['sequence'].isna(), b'')
         alleles['sequence'] = alleles[~alleles['sequence'].isna()]['sequence'].apply(trgt.dna_encode)
 
     return alleles
@@ -126,7 +154,7 @@ def vcf_to_tdb(vcf_fn):
     ret["locus"] = data[["LocusID", "chrom", "start", "end"]].reset_index(drop=True).copy()
 
     logging.info("Wrangling alleles")
-    allele_df = pull_alleles(data, encode=False)
+    allele_df = pull_alleles(data, encode=True)
     ret["allele"] = allele_df
     logging.info("allele count:\t%d", len(allele_df))
 
