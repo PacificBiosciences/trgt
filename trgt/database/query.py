@@ -40,7 +40,7 @@ def monz_ref(dbname):
     """
     monozygotic reference per-sample and overall
     """
-    data = trgt.load_tdb("family.tdb")
+    data = trgt.load_tdb(dbname)
 
     out_table = []
     for samp,table in data["sample"].items():
