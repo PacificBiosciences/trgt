@@ -144,7 +144,7 @@ def pull_alleles(data, encode=False):
                     .reset_index(drop=True)
                     .drop_duplicates(subset=["LocusID", "sequence"]))
     alleles["allele_length"] = alleles["sequence"].str.len()
-    alleles.loc[alleles["allele_number"] == 0, "sequence"] = None
+    alleles.loc[alleles["allele_number"] == 0, "sequence"] = ""
     alleles = (alleles.sort_values(["LocusID", "allele_number"])
                     [["LocusID", "allele_number", "allele_length", "sequence"]]
                     .reset_index(drop=True))
@@ -231,32 +231,18 @@ def allele_consolidator(exist_db, new_db, consol_locus):
 
     ea = exist_db["allele"].set_index(["LocusID", "sequence"])
     na = new_db["allele"].set_index(["LocusID", "sequence"])
-    new_allele = (ea.join(na, rsuffix='_new', how='outer')
-                    .reset_index()
-                    .sort_values(["LocusID", "allele_number", "allele_number_new"])
-                    .drop_duplicates())
+    new_allele = (ea.merge(na, how='outer', left_index=True, right_index=True)
+                        .reset_index()
+                        .sort_values(["LocusID", "allele_number_x", "allele_number_y"]))
 
-    # Identical Locus/sequence will use existing allele_numbers
-    # New alleles will need next available allele_numbers
-    def allele_num_consolidate(x):
-        l_val = x.iloc[0]["allele_number"]
-        l_val = int(x.iloc[0]["allele_number_new"]) if math.isnan(l_val) else int(l_val)
-        return np.arange(l_val, l_val + len(x), dtype='int')
-    new_allele["n_an"] = np.hstack(new_allele.groupby(["LocusID"]).apply(allele_num_consolidate))
-
-    new_allele["allele_length"] = (new_allele["allele_length"]
-                                    .fillna(new_allele["allele_length_new"])
+    new_allele["allele_number"] = (new_allele.groupby(["LocusID"]).cumcount())
+    new_allele["allele_length"] = (new_allele["allele_length_x"]
+                                    .fillna(new_allele["allele_length_y"])
                                     .astype(int))
-    # hold this for samples
-    allele_lookup = new_allele.dropna(subset="allele_number_new").copy()
-    new_allele["allele_number"] = new_allele["n_an"]
+    allele_lookup = (new_allele[["LocusID", "allele_number_y", "allele_number"]]
+                        .dropna()
+                        .set_index(["LocusID", "allele_number_y"]))
     ret = new_allele[["LocusID", "allele_number", "allele_length", "sequence"]].copy()
-
-    allele_lookup["allele_number_new"] = allele_lookup["allele_number_new"].astype(int)
-    allele_lookup = (allele_lookup[["LocusID", "allele_number_new", "n_an"]]
-                        .rename(columns={"allele_number_new":"allele_number"})
-                        .drop_duplicates(subset=["LocusID", "allele_number"])
-                        .set_index(["LocusID", "allele_number"])["n_an"])
 
     return ret, allele_lookup
 
@@ -270,10 +256,8 @@ def sample_consolidator(exist_db, new_db, allele_lookup):
     # Update new_db's allele numbers
     for sample, table in new_db["sample"].items():
         new_sample = table.set_index(["LocusID", "allele_number"])
-        new_sample["n_an"] = allele_lookup
-        new_sample = new_sample.reset_index()
-        # I don't understand why I have to fillna here.. there shouldn't be new allele numbers...?
-        new_sample["allele_number"] = new_sample["n_an"].fillna(new_sample["allele_number"]).astype(int)
+        new_sample["allele_number"] = allele_lookup
+        new_sample = new_sample.reset_index(level=0).reset_index(drop=True)
         ret[sample] = new_sample[["LocusID", "allele_number", "spanning_reads", "ALCI_lower", "ALCI_upper"]].copy()
         gt_count += len(ret[sample])
     return ret, gt_count
