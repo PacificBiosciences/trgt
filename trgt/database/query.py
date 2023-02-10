@@ -38,7 +38,7 @@ def allele_seqs(dbname):
 
 def monz_ref(dbname):
     """
-    monozygotic reference per-sample and overall
+    Monozygotic reference sites per-sample and overall
     """
     data = trgt.load_tdb("family.tdb")
 
@@ -62,15 +62,32 @@ def monz_ref(dbname):
     out_table['pct'] = out_table['mon_ref'] / out_table['loci']
     out_table.to_csv('/dev/stdout', sep='\t', index=False)
 
+def gtmerge(dbname):
+    """
+    Collect per-locus genotypes
+    """
+    data = trgt.load_tdb(dbname)
+    loci = data['locus'].set_index('LocusID')
+    snames = {}
+    gt_parts = []
+    for idx, (samp, table) in enumerate(data['sample'].items()):
+        table['gt_id'] = (table.groupby(["LocusID"]).cumcount())
+        gts = (table.pivot(index="LocusID", columns="gt_id", values="allele_number")
+                    .apply((lambda x: f"{x[0]:.0f}/{x[1]:.0f}"), axis=1))
+        snames[idx] = samp
+        gt_parts.append(gts)
+    out = loci.join(pd.concat(gt_parts, axis=1, names=snames).fillna('./.'))
+    out.rename(columns=snames).to_csv("/dev/stdout", sep='\t', index=False)
+
 QS = {
-    "ac": ("Locus - allele number - allele count", allele_count),
-    "as": ("Locus - allele number - allele sequence", allele_seqs),
-    "monref": ("How many loci are monozygotic reference", monz_ref),
-    # genotypes,
+    "ac": allele_count,
+    "as": allele_seqs,
+    "monref": monz_ref,
+    "gtmerge": gtmerge,
     # copy numbers...?
 }
 
-USAGE = "TRGT queries:\n" + "\n".join([f"    {k:9} {t[0]}" for k,t in QS.items()])
+USAGE = "TRGT queries:\n" + "\n".join([f"    {k:9}: {t.__doc__.strip()}" for k,t in QS.items()])
 
 def query_main(args):
     """
@@ -83,4 +100,4 @@ def query_main(args):
     parser.add_argument("dbname", metavar="TDB", type=str,
                         help="TRGT db name")
     args = parser.parse_args(args)
-    QS[args.query][1](args.dbname)
+    QS[args.query](args.dbname)
