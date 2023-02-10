@@ -2,6 +2,7 @@
 Add new VCF to existing database
 """
 import os
+import sys
 import logging
 import argparse
 import truvari

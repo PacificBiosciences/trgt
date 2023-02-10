@@ -6,11 +6,17 @@ from itertools import product
 import trgt
 
 def test(seq):
+    """
+    assert sequence can be encoded/decoded
+    """
     x = trgt.dna_encode(seq)
     y = trgt.dna_decode(x, len(seq))
     assert seq == y, f"{seq} != {y}"
 
 def all_tests():
+    """
+    testing sequences
+    """
     test('ATCAGACAGG')
     test('AAAGAGAGA')
     test('CAATACACATACAGACAAGAGTTAG')

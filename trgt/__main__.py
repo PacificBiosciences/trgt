@@ -5,19 +5,18 @@ TRGT main entrypoint
 import sys
 import argparse
 
-import trgt
 from trgt.dbcmds import db_main
 
 def run_main(args):
     """
     placeholder
     """
-    print("Would run trgt executable")
+    print(f"Would run trgt executable + {args}")
 
 CMDS = {'run': run_main,
         'db': db_main}
 
-USAGE = f"""\
+USAGE = """\
 TRGT v0.0.1 - Tandem repeat genotyping and visualization from PacBio HiFi data
 
 Available commands:

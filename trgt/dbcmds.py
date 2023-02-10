@@ -1,3 +1,6 @@
+"""
+trgt main entrypoint
+"""
 import argparse
 
 import trgt.database as tdb
@@ -22,4 +25,3 @@ def db_main(args):
                         help="Options to pass to the command")
     args = parser.parse_args(args)
     CMDS[args.cmd][1](args.options)
-

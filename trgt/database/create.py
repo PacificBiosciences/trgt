@@ -1,3 +1,6 @@
+"""
+Create a tdb
+"""
 import os
 import sys
 import logging
@@ -14,7 +17,7 @@ def get_samples(file):
     """
     if file.endswith((".vcf", ".vcf.gz")):
         return list(pysam.VariantFile(file).header.samples)
-    return trgt.get_tdb_samplenames(file)       
+    return trgt.get_tdb_samplenames(file)
 
 def check_args(args):
     """
@@ -27,7 +30,7 @@ def check_args(args):
         check_fail = True
     if not args.output.endswith(".tdb"):
         logging.error(f"output {args.output} must end with `.tdb`")
-        chec_fail = True
+        check_fail = True
     seen_samples = {}
     for i in args.inputs:
         if not os.path.exists(i):

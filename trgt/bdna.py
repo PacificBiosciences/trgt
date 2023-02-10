@@ -46,4 +46,3 @@ def dna_decode(bstr, m_len):
                 i >>=  2
                 m_len -= 1
     return "".join(miter(bstr, m_len))
-
