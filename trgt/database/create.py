@@ -27,7 +27,7 @@ def check_args(args):
         check_fail = True
     if not args.output.endswith(".tdb"):
         logging.error(f"output {args.output} must end with `.tdb`")
-        chec_fail = True
+        check_fail = True
     seen_samples = {}
     for i in args.inputs:
         if not os.path.exists(i):

@@ -63,7 +63,7 @@ def set_tdb_types(d):
     a_types = {"LocusID": np.uint32,
                "allele_number": np.uint16,
                "allele_length": np.uint16,
-               "sequence": np.bytes_
+               # "sequence": np.bytes_ this truncates for some reason
                }
     s_types = {"LocusID": np.uint32,
                "allele_number": np.uint16,
