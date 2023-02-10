@@ -255,6 +255,7 @@ def allele_consolidator(exist_db, new_db, consol_locus):
     allele_lookup["allele_number_new"] = allele_lookup["allele_number_new"].astype(int)
     allele_lookup = (allele_lookup[["LocusID", "allele_number_new", "n_an"]]
                         .rename(columns={"allele_number_new":"allele_number"})
+                        .drop_duplicates(subset=["LocusID", "allele_number"])
                         .set_index(["LocusID", "allele_number"])["n_an"])
 
     return ret, allele_lookup
@@ -268,12 +269,13 @@ def sample_consolidator(exist_db, new_db, allele_lookup):
 
     # Update new_db's allele numbers
     for sample, table in new_db["sample"].items():
-        new_sample = (table.set_index(["LocusID", "allele_number"])
-                        .join(allele_lookup, how='left')
-                        .reset_index())
+        new_sample = table.set_index(["LocusID", "allele_number"])
+        new_sample["n_an"] = allele_lookup
+        new_sample = new_sample.reset_index()
+        # I don't understand why I have to fillna here.. there shouldn't be new allele numbers...?
         new_sample["allele_number"] = new_sample["n_an"].fillna(new_sample["allele_number"]).astype(int)
-        gt_count += len(new_sample)
         ret[sample] = new_sample[["LocusID", "allele_number", "spanning_reads", "ALCI_lower", "ALCI_upper"]].copy()
+        gt_count += len(ret[sample])
     return ret, gt_count
 
 def tdb_consolidate(exist_db, new_db):
