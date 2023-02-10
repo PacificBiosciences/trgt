@@ -19,6 +19,19 @@ def dna_encode(seq):
     ret.seek(0)
     return ret.read()
 
+def dna_encode_array(seq):
+    """
+    Turn a string of DNA to uint8 array
+    This actually makes it smaller, but then it becomes difficult to consolidate alleles
+    """
+    ret = []
+    for i in range(0, len(seq), 4):
+        byte = 0
+        for pos, nuc in enumerate(seq[i:i+4]):
+            byte += NUCS[nuc] << pos * 2
+        ret.append(byte)
+    return tuple(ret)
+
 def dna_decode(bstr, m_len):
     """
     Turn bytes to string of DNA

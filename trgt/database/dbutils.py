@@ -96,6 +96,39 @@ def dump_tdb(data, output):
     for sample, value in data['sample'].items():
         value.to_parquet(os.path.join(output, f"sample.{sample}.pq"), index=False, compression='gzip')
 
+<<<<<<< Updated upstream
+=======
+def _dump_tdb_experimental(data, output):
+    """
+    Write tdb data to output folder. output folder must already exist.
+
+    WARNING: will overwrite existing data
+    """
+    if not os.path.exists(output):
+        os.mkdir(output)
+    pq_fns = get_tdb_files(output)
+    set_tdb_types(data)
+    # Possibly https://arrow.apache.org/docs/python/generated/pyarrow.parquet.ParquetWriter.html
+    # And help(df.to_parquet)
+    data['locus'].to_parquet(pq_fns['locus'], index=False, compression='gzip')
+
+    allele = pa.Table.from_pandas(data['allele'])
+    a_schema = pa.schema([('LocusID', pa.uint32()),
+                          ('allele_number', pa.uint16()),
+                          ('allele_length', pa.uint16()),
+                          # somehow the dtype gets messed up by.. consol_allele..?
+                          # it was (a tiny bit) smaller, though
+                          ('sequence', pa.Int8Array())
+                         ])
+    writer = pq.ParquetWriter(pq_fns['allele'], a_schema, compression='gzip')
+    writer.write_table(allele)
+    writer.close()
+
+    #data['allele'].to_parquet(pq_fns['allele'], index=False, compression='gzip')
+    for sample, value in data['sample'].items():
+        value.to_parquet(os.path.join(output, f"sample.{sample}.pq"), index=False, compression='gzip')
+
+>>>>>>> Stashed changes
 def pull_alleles(data, encode=False):
     """
     Turn alleles into a table
@@ -117,7 +150,7 @@ def pull_alleles(data, encode=False):
                     [["LocusID", "allele_number", "allele_length", "sequence"]]
                     .reset_index(drop=True))
     if encode:
-        alleles['sequence'] = alleles['sequence'].where(~alleles['sequence'].isna(), b'')
+        #alleles['sequence'] = alleles['sequence'].where(~alleles['sequence'].isna(), [])
         alleles['sequence'] = alleles[~alleles['sequence'].isna()]['sequence'].apply(trgt.dna_encode)
 
     return alleles
@@ -155,7 +188,7 @@ def vcf_to_tdb(vcf_fn):
     ret["locus"] = data[["LocusID", "chrom", "start", "end"]].reset_index(drop=True).copy()
 
     logging.info("Wrangling alleles")
-    allele_df = pull_alleles(data, encode=True)
+    allele_df = pull_alleles(data, encode=False)
     ret["allele"] = allele_df
     logging.info("allele count:\t%d", len(allele_df))
 
