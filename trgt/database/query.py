@@ -1,6 +1,7 @@
 """
 Standard, basic queries
 """
+import os
 import argparse
 import pandas as pd
 import trgt
@@ -39,7 +40,7 @@ def allele_seqs(dbname):
 
 def monz_ref(dbname):
     """
-    monozygotic reference per-sample and overall
+    Monozygotic reference sites per-sample and overall
     """
     data = trgt.load_tdb(dbname)
 
@@ -63,15 +64,59 @@ def monz_ref(dbname):
     out_table['pct'] = out_table['mon_ref'] / out_table['loci']
     out_table.to_csv('/dev/stdout', sep='\t', index=False)
 
+def gtmerge(dbname):
+    """
+    Collect per-locus genotypes
+    """
+    data = trgt.load_tdb(dbname)
+    loci = data['locus'].set_index('LocusID')
+    snames = {}
+    gt_parts = []
+    for idx, (samp, table) in enumerate(data['sample'].items()):
+        table['gt_id'] = (table.groupby(["LocusID"]).cumcount())
+        gts = (table.pivot(index="LocusID", columns="gt_id", values="allele_number")
+                    .apply((lambda x: f"{x[0]:.0f}/{x[1]:.0f}"), axis=1))
+        snames[idx] = samp
+        gt_parts.append(gts)
+    out = loci.join(pd.concat(gt_parts, axis=1, names=snames).fillna('./.'))
+    out.rename(columns=snames).sort_values(["chrom", "start", "end"]).to_csv("/dev/stdout", sep='\t', index=False)
+
+# Can also pass parameters as **kwargs?
+# Though that gets difficult to auto format if we want to expose them
+# unless we override so that -h shows one-liner where --help shows full docs
+# and --help in conjunction with a Q only shows the single query's full docs
+def metadata(dbname):
+    """
+    Get table properties e.g. row counts and memory/disk sizes (mb)
+    """
+    fnames = trgt.get_tdb_files(dbname)
+    data = trgt.load_tdb(dbname)
+    print(f"table\tdisk\tmem\trows")
+    dsize = round(os.path.getsize(fnames['locus']) / 1.0e6, 1)
+    msize = round(data['locus'].memory_usage().sum() / 1.0e6, 1)
+    shape = data['locus'].shape
+    print(f"locus\t{dsize}\t{msize}\t{shape[0]}")
+
+    dsize = round(os.path.getsize(fnames['allele']) / 1.0e6, 1)
+    msize = round(data['allele'].memory_usage().sum() / 1.0e6, 1)
+    shape = data['allele'].shape
+    print(f"allele\t{dsize}\t{msize}\t{shape[0]}")
+    for samp in fnames['sample']:
+        dsize = round(os.path.getsize(fnames['sample'][samp]) / 1.0e6, 1)
+        msize = round(data['sample'][samp].memory_usage().sum() / 1.0e6, 1)
+        shape = data['sample'][samp].shape
+        print(f"{samp}\t{dsize}\t{msize}\t{shape[0]}")
+       
 QS = {
-    "ac": ("Locus - allele number - allele count", allele_count),
-    "as": ("Locus - allele number - allele sequence", allele_seqs),
-    "monref": ("How many loci are monozygotic reference", monz_ref),
-    # genotypes,
+    "ac": allele_count,
+    "as": allele_seqs,
+    "monref": monz_ref,
+    "gtmerge": gtmerge,
+    "metadata": metadata,
     # copy numbers...?
 }
 
-USAGE = "TRGT queries:\n" + "\n".join([f"    {k:9} {t[0]}" for k,t in QS.items()])
+USAGE = "TRGT queries:\n" + "\n".join([f"    {k:9}: {t.__doc__.strip()}" for k,t in QS.items()])
 
 def query_main(args):
     """
@@ -84,4 +129,4 @@ def query_main(args):
     parser.add_argument("dbname", metavar="TDB", type=str,
                         help="TRGT db name")
     args = parser.parse_args(args)
-    QS[args.query][1](args.dbname)
+    QS[args.query](args.dbname)
