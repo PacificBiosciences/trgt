@@ -1,6 +1,7 @@
 """
 Standard, basic queries
 """
+import os
 import argparse
 import pandas as pd
 import trgt
@@ -80,11 +81,38 @@ def gtmerge(dbname):
     out = loci.join(pd.concat(gt_parts, axis=1, names=snames).fillna('./.'))
     out.rename(columns=snames).to_csv("/dev/stdout", sep='\t', index=False)
 
+# Can also pass parameters as **kwargs?
+# Though that gets difficult to auto format if we want to expose them
+# unless we override so that -h shows one-liner where --help shows full docs
+# and --help in conjunction with a Q only shows the single query's full docs
+def metadata(dbname):
+    """
+    Get table properties e.g. row counts and memory/disk sizes (mb)
+    """
+    fnames = trgt.get_tdb_files(dbname)
+    data = trgt.load_tdb(dbname)
+    print(f"table\tdisk\tmem\trows")
+    dsize = round(os.path.getsize(fnames['locus']) / 1.0e6, 1)
+    msize = round(data['locus'].memory_usage().sum() / 1.0e6, 1)
+    shape = data['locus'].shape
+    print(f"locus\t{dsize}\t{msize}\t{shape[0]}")
+
+    dsize = round(os.path.getsize(fnames['allele']) / 1.0e6, 1)
+    msize = round(data['allele'].memory_usage().sum() / 1.0e6, 1)
+    shape = data['allele'].shape
+    print(f"allele\t{dsize}\t{msize}\t{shape[0]}")
+    for samp in fnames['sample']:
+        dsize = round(os.path.getsize(fnames['sample'][samp]) / 1.0e6, 1)
+        msize = round(data['sample'][samp].memory_usage().sum() / 1.0e6, 1)
+        shape = data['sample'][samp].shape
+        print(f"{samp}\t{dsize}\t{msize}\t{shape[0]}")
+       
 QS = {
     "ac": allele_count,
     "as": allele_seqs,
     "monref": monz_ref,
     "gtmerge": gtmerge,
+    "metadata": metadata,
     # copy numbers...?
 }
 

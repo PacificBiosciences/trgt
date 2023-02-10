@@ -68,7 +68,7 @@ def create_main(args):
     for i in args.inputs:
         logging.info("Loading %s", i)
         n_data = trgt.load_tdb(i) if i.endswith(".tdb") else trgt.vcf_to_tdb(i)
-        m_data = n_data if m_data is None else trgt.tdb_combine(m_data, n_data)
+        m_data = n_data if m_data is None else trgt.tdb_consolidate(m_data, n_data)
 
     logging.info("Writing parquet files")
     trgt.dump_tdb(m_data, args.output)

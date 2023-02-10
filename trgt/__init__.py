@@ -11,6 +11,6 @@ from trgt.database.dbutils import (
     get_tdb_files,
     get_tdb_samplenames,
     load_tdb,
-    tdb_combine,
+    tdb_consolidate,
     vcf_to_tdb,
 )

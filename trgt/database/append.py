@@ -50,6 +50,6 @@ def append_main(args):
 
     exist_db = trgt.load_tdb(args.to)
     new_db = trgt.load_tdb(args.fr) if args.fr.endswith(".tdb") else trgt.vcf_to_tdb(args.fr)
-    result = trgt.tdb_combine(exist_db, new_db)
+    result = trgt.tdb_consolidate(exist_db, new_db)
     trgt.dump_tdb(result, args.to)
     logging.info("Finished")

@@ -276,7 +276,7 @@ def sample_consolidator(exist_db, new_db, allele_lookup):
         ret[sample] = new_sample[["LocusID", "allele_number", "spanning_reads", "ALCI_lower", "ALCI_upper"]].copy()
     return ret, gt_count
 
-def tdb_combine(exist_db, new_db):
+def tdb_consolidate(exist_db, new_db):
     """
     Combine two tdbs. returns new in-memory tdb
     """
