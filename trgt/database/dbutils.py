@@ -187,7 +187,7 @@ def vcf_to_tdb(vcf_fn):
     ret["locus"] = data[["LocusID", "chrom", "start", "end"]].reset_index(drop=True).copy()  # pylint: disable=unsubscriptable-object # pylint/issues/3139
 
     logging.info("Wrangling alleles")
-    allele_df = pull_alleles(data, encode=False)
+    allele_df = pull_alleles(data, encode=True)
     ret["allele"] = allele_df
     logging.info("allele count:\t%d", len(allele_df))
 
@@ -229,19 +229,19 @@ def allele_consolidator(exist_db, new_db, consol_locus):
     for table in new_db["sample"].values():
         table["LocusID"] = table["LocusID"].map(new_locusids)
 
-    ea = exist_db["allele"].set_index(["LocusID", "sequence"])
-    na = new_db["allele"].set_index(["LocusID", "sequence"])
+    ea = exist_db["allele"].set_index(["LocusID", "sequence", "allele_length"])
+    na = new_db["allele"].set_index(["LocusID", "sequence", "allele_length"])
     new_allele = (ea.merge(na, how='outer', left_index=True, right_index=True)
                         .reset_index()
                         .sort_values(["LocusID", "allele_number_x", "allele_number_y"]))
 
     new_allele["allele_number"] = (new_allele.groupby(["LocusID"]).cumcount())
-    new_allele["allele_length"] = (new_allele["allele_length_x"]
-                                    .fillna(new_allele["allele_length_y"])
-                                    .astype(int))
+
     allele_lookup = (new_allele[["LocusID", "allele_number_y", "allele_number"]]
                         .dropna()
-                        .set_index(["LocusID", "allele_number_y"]))
+                        .drop_duplicates()
+                        .rename(columns={"allele_number": "n_an", "allele_number_y":"allele_number"})
+                        .set_index(["LocusID", "allele_number"]))
     ret = new_allele[["LocusID", "allele_number", "allele_length", "sequence"]].copy()
 
     return ret, allele_lookup
@@ -253,12 +253,13 @@ def sample_consolidator(exist_db, new_db, allele_lookup):
     ret = exist_db['sample']
     gt_count = len(exist_db['sample'])
 
-    # Update new_db's allele numbers
     for sample, table in new_db["sample"].items():
-        new_sample = table.set_index(["LocusID", "allele_number"])
-        new_sample["allele_number"] = allele_lookup
-        new_sample = new_sample.reset_index(level=0).reset_index(drop=True)
-        ret[sample] = new_sample[["LocusID", "allele_number", "spanning_reads", "ALCI_lower", "ALCI_upper"]].copy()
+        ret[sample] = (table.set_index(["LocusID", "allele_number"])
+                        .join(allele_lookup)
+                        .reset_index()
+                        .drop(columns="allele_number")
+                        .rename(columns={"n_an":"allele_number"})
+                    )[["LocusID", "allele_number", "spanning_reads", "ALCI_lower", "ALCI_upper"]].copy()
         gt_count += len(ret[sample])
     return ret, gt_count
 
