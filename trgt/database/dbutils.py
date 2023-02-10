@@ -96,8 +96,6 @@ def dump_tdb(data, output):
     for sample, value in data['sample'].items():
         value.to_parquet(os.path.join(output, f"sample.{sample}.pq"), index=False, compression='gzip')
 
-<<<<<<< Updated upstream
-=======
 def _dump_tdb_experimental(data, output):
     """
     Write tdb data to output folder. output folder must already exist.
@@ -128,7 +126,6 @@ def _dump_tdb_experimental(data, output):
     for sample, value in data['sample'].items():
         value.to_parquet(os.path.join(output, f"sample.{sample}.pq"), index=False, compression='gzip')
 
->>>>>>> Stashed changes
 def pull_alleles(data, encode=False):
     """
     Turn alleles into a table
