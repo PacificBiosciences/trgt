@@ -1,3 +1,6 @@
+"""
+Create a tdb
+"""
 import os
 import sys
 import logging
@@ -14,7 +17,7 @@ def get_samples(file):
     """
     if file.endswith((".vcf", ".vcf.gz")):
         return list(pysam.VariantFile(file).header.samples)
-    return trgt.get_tdb_samplenames(file)       
+    return trgt.get_tdb_samplenames(file)
 
 def check_args(args):
     """

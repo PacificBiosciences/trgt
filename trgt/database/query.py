@@ -12,16 +12,16 @@ def allele_count(dbname):
     data = trgt.load_tdb(dbname)
 
     # For a single sample, get how many times an allele is found
-    allele_count = data['allele'][["LocusID", "allele_number"]].copy()
-    allele_count['allele_count'] = 0
-    allele_count = allele_count.set_index(["LocusID", "allele_number"])
+    ac = data['allele'][["LocusID", "allele_number"]].copy()
+    ac['allele_count'] = 0
+    ac = allele_count.set_index(["LocusID", "allele_number"])
 
-    for samp_name, samp_data in data['sample'].items():
-        num_samps = data['sample'][samp_name].reset_index().groupby(["LocusID", "allele_number"]).size()
-        allele_count["allele_count"] += num_samps
+    for samp_data in data['sample'].values():
+        num_samps = samp_data.reset_index().groupby(["LocusID", "allele_number"]).size()
+        ac["allele_count"] += num_samps
 
-    allele_count = allele_count.reset_index()
-    view = data['locus'].join(allele_count, on='LocusID', rsuffix="_")
+    ac = allele_count.reset_index()
+    view = data['locus'].join(ac, on='LocusID', rsuffix="_")
     view['allele_count'] = view['allele_count'].fillna(0)
     view[["chrom", "start", "end", "allele_number", "allele_count"]].to_csv('/dev/stdout', sep='\t', index=False)
 
@@ -31,7 +31,8 @@ def allele_seqs(dbname):
     """
     tdb_fns = trgt.get_tdb_files(dbname)
     alleles = pd.read_parquet(tdb_fns["allele"])
-    deseq = lambda x: trgt.dna_decode(x['sequence'], x['allele_length'])
+    def deseq(x):
+        return trgt.dna_decode(x['sequence'], x['allele_length'])
     alleles['sequence'] = alleles[~alleles["sequence"].isna()].apply(deseq, axis=0)
     # Need fasta fetching for reference alleles
     alleles[["LocusID", "allele_number", "sequence"]].dropna().to_csv("/dev/stdout", sep='\t', index=False)

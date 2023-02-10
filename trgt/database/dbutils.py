@@ -10,6 +10,8 @@ import pysam
 import truvari
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 import trgt
 
@@ -102,8 +104,6 @@ def _dump_tdb_experimental(data, output):
 
     WARNING: will overwrite existing data
     """
-    import pyarrow as pa
-    import pyarrow.parquet as pq
     if not os.path.exists(output):
         os.mkdir(output)
     pq_fns = get_tdb_files(output)
@@ -111,7 +111,7 @@ def _dump_tdb_experimental(data, output):
     # Possibly https://arrow.apache.org/docs/python/generated/pyarrow.parquet.ParquetWriter.html
     # And help(df.to_parquet)
     data['locus'].to_parquet(pq_fns['locus'], index=False, compression='gzip')
-    
+
     allele = pa.Table.from_pandas(data['allele'])
     a_schema = pa.schema([('LocusID', pa.uint32()),
                           ('allele_number', pa.uint16()),
@@ -184,7 +184,7 @@ def vcf_to_tdb(vcf_fn):
     logging.info("locus count:\t%d", len(data))
     data["LocusID"] = range(len(data))
 
-    ret["locus"] = data[["LocusID", "chrom", "start", "end"]].reset_index(drop=True).copy()
+    ret["locus"] = data[["LocusID", "chrom", "start", "end"]].reset_index(drop=True).copy()  # pylint: disable=unsubscriptable-object # pylint/issues/3139
 
     logging.info("Wrangling alleles")
     allele_df = pull_alleles(data, encode=True)
@@ -219,14 +219,14 @@ def locus_consolidator(exist_db, new_db):
     ret = union.reset_index()[["LocusID", "chrom", "start", "end"]].copy()
     return ret, union
 
-def consol_allele(exist_db, new_db, consol_locus):
+def allele_consolidator(exist_db, new_db, consol_locus):
     """
     Consolidate allele tables
     """
     new_locusids = dict(zip(consol_locus["LocusID_new"], consol_locus["LocusID"]))
     new_db["allele"]["LocusID"] = new_db["allele"]["LocusID"].map(new_locusids)
 
-    for sample, table in new_db["sample"].items():
+    for table in new_db["sample"].values():
         table["LocusID"] = table["LocusID"].map(new_locusids)
 
     ea = exist_db["allele"].set_index(["LocusID", "sequence"])
@@ -259,7 +259,7 @@ def consol_allele(exist_db, new_db, consol_locus):
 
     return ret, allele_lookup
 
-def consol_sample(exist_db, new_db, allele_lookup):
+def sample_consolidator(exist_db, new_db, allele_lookup):
     """
     Consolidate sample tables
     """
@@ -286,11 +286,11 @@ def tdb_combine(exist_db, new_db):
     logging.info("locus count:\t%d", len(ret['locus']))
 
     logging.info("Consolidating alleles")
-    ret["allele"], allele_lookup = consol_allele(exist_db, new_db, consol_locus)
+    ret["allele"], allele_lookup = allele_consolidator(exist_db, new_db, consol_locus)
     logging.info("allele count:\t%d", len(ret["allele"]))
 
     logging.info("Consolidating samples")
-    ret['sample'], gt_count = consol_sample(exist_db, new_db, allele_lookup)
+    ret['sample'], gt_count = sample_consolidator(exist_db, new_db, allele_lookup)
     logging.info("genotype count:\t%d", gt_count)
 
     return ret
