@@ -79,7 +79,7 @@ def gtmerge(dbname):
         snames[idx] = samp
         gt_parts.append(gts)
     out = loci.join(pd.concat(gt_parts, axis=1, names=snames).fillna('./.'))
-    out.rename(columns=snames).to_csv("/dev/stdout", sep='\t', index=False)
+    out.rename(columns=snames).sort_values(["chrom", "start", "end"]).to_csv("/dev/stdout", sep='\t', index=False)
 
 # Can also pass parameters as **kwargs?
 # Though that gets difficult to auto format if we want to expose them
