@@ -77,7 +77,7 @@ def gtmerge(dbname):
                     .apply((lambda x: f"{x[0]:.0f}/{x[1]:.0f}"), axis=1))
         snames[idx] = samp
         gt_parts.append(gts)
-    out = loci.join(pd.concat(gt_parts, axis=1, names=snames).fillna('./.'))
+    out = loci.join(pd.concat(gt_parts, axis=1, names=snames)).fillna('./.')
     return out.rename(columns=snames).sort_values(["chrom", "start", "end"])
 
 def metadata(dbname):

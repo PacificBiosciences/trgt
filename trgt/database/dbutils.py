@@ -133,19 +133,20 @@ def pull_saps(data, sample):
     """
     Turn sample allele properties into a table
     """
+    # Remove sites with uninformative genotype information
+    data = data[~data[f'{sample}_GT'].isin([(None,)])]
     gt = pd.DataFrame(data[f"{sample}_GT"].to_list(), columns=["GT1", "GT2"], index=data.index)
     span = pd.DataFrame(data[f"{sample}_SD"].to_list(), columns=["SD1", "SD2"], index=data.index)
-    alci = pd.DataFrame(data[f"{sample}_ALCI"].to_list(), columns=["ALCI1", "ALCI2"], index=data.index)
+    alci = pd.DataFrame(data[f"{sample}_ALLR"].to_list(), columns=["LR1", "LR2"], index=data.index)
     sap = pd.concat([data[["LocusID"]], span, alci, gt], axis=1)
 
     renamer = {"SD1": "spanning_reads", "SD2": "spanning_reads",
-               "ALCI1":"ALCI", "ALCI2":"ALCI", "GT1":"allele_number", "GT2":"allele_number"}
-    sap1 = sap[["LocusID", "GT1", "SD1", "ALCI1"]].rename(columns=renamer)
-    sap2 = sap[["LocusID", "GT2", "SD2", "ALCI2"]].rename(columns=renamer)
-    sap = pd.concat([sap1, sap2], axis=0)
-    sap[["length_range_lower", "length_range_upper"]] = sap["ALCI"].str.split('-', expand=True).astype(int)
-    sap = sap.drop(columns=["ALCI"])
-    return sap.reset_index(drop=True)
+               "LR1":"LR", "LR2":"LR", "GT1":"allele_number", "GT2":"allele_number"}
+    sap = pd.concat([sap[["LocusID", "GT1", "SD1", "LR1"]].rename(columns=renamer),
+                     sap[["LocusID", "GT2", "SD2", "LR2"]].rename(columns=renamer)],
+                     axis=0)
+    sap[["length_range_lower", "length_range_upper"]] = sap["LR"].str.split('-', expand=True).astype(int)
+    return sap.drop(columns=["LR"]).reset_index(drop=True)
 
 def vcf_to_tdb(vcf_fn):
     """
