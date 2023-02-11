@@ -38,16 +38,20 @@ def get_tdb_files(dbname):
     return {'locus': l_fn, 'allele': a_fn, 'sample': s_dict}
 
 
-def load_tdb(dbname):
+def load_tdb(dbname, decode=True):
     """
     Loads files into dataframes
     return dict with keys of table name and values of the table(s)
     Note that 'sample' will have a value sample_name:DataFrame
+
+    if decode, turn the encoded allele.sequence into a string
     """
     names = get_tdb_files(dbname)
     ret = {}
     ret['locus'] = pd.read_parquet(names['locus'])
     ret['allele'] = pd.read_parquet(names['allele'])
+    if decode:
+        ret['allele']['sequence'] = ret['allele'].apply(trgt.dna_decode_df, axis=1)
     ret['sample'] = {}
     for samp, fn in names['sample'].items():
         ret['sample'][samp] = pd.read_parquet(fn)
@@ -81,7 +85,7 @@ def set_tdb_types(d):
 
 def dump_tdb(data, output):
     """
-    Write tdb data to output folder. output folder must already exist.
+    Write tdb data to output folder
 
     WARNING: will overwrite existing data
     """
@@ -89,42 +93,20 @@ def dump_tdb(data, output):
         os.mkdir(output)
     pq_fns = get_tdb_files(output)
     set_tdb_types(data)
-    # We have options here
-    # See https://stackoverflow.com/questions/35789412/spark-sql-difference-between-gzip-vs-snappy-vs-lzo-compression-formats
-    # Possibly https://arrow.apache.org/docs/python/generated/pyarrow.parquet.ParquetWriter.html
-    # And help(df.to_parquet)
-    data['locus'].to_parquet(pq_fns['locus'], index=False, compression='gzip')
-    data['allele'].to_parquet(pq_fns['allele'], index=False, compression='gzip')
-    for sample, value in data['sample'].items():
-        value.to_parquet(os.path.join(output, f"sample.{sample}.pq"), index=False, compression='gzip')
-
-def _dump_tdb_experimental(data, output):
-    """
-    Write tdb data to output folder. output folder must already exist.
-
-    WARNING: will overwrite existing data
-    """
-    if not os.path.exists(output):
-        os.mkdir(output)
-    pq_fns = get_tdb_files(output)
-    set_tdb_types(data)
-    # Possibly https://arrow.apache.org/docs/python/generated/pyarrow.parquet.ParquetWriter.html
-    # And help(df.to_parquet)
     data['locus'].to_parquet(pq_fns['locus'], index=False, compression='gzip')
 
-    allele = pa.Table.from_pandas(data['allele'])
+    allele = pa.Table.from_pandas(data['allele'][["LocusID", "allele_number", "allele_length"]])
+    seq = pa.Int8Array.from_pandas(data['allele']['sequence'].apply(trgt.dna_encode), type=pa.list_(pa.uint8()))
+    allele = allele.set_column(3, 'sequence', seq)
     a_schema = pa.schema([('LocusID', pa.uint32()),
                           ('allele_number', pa.uint16()),
                           ('allele_length', pa.uint16()),
-                          # somehow the dtype gets messed up by.. consol_allele..?
-                          # it was (a tiny bit) smaller, though
-                          ('sequence', pa.Int8Array())
+                          ('sequence', pa.list_(pa.uint8()))
                          ])
     writer = pq.ParquetWriter(pq_fns['allele'], a_schema, compression='gzip')
     writer.write_table(allele)
     writer.close()
 
-    #data['allele'].to_parquet(pq_fns['allele'], index=False, compression='gzip')
     for sample, value in data['sample'].items():
         value.to_parquet(os.path.join(output, f"sample.{sample}.pq"), index=False, compression='gzip')
 
@@ -187,7 +169,7 @@ def vcf_to_tdb(vcf_fn):
     ret["locus"] = data[["LocusID", "chrom", "start", "end"]].reset_index(drop=True).copy()  # pylint: disable=unsubscriptable-object # pylint/issues/3139
 
     logging.info("Wrangling alleles")
-    allele_df = pull_alleles(data, encode=True)
+    allele_df = pull_alleles(data, encode=False)
     ret["allele"] = allele_df
     logging.info("allele count:\t%d", len(allele_df))
 
@@ -228,7 +210,7 @@ def allele_consolidator(exist_db, new_db, consol_locus):
 
     for table in new_db["sample"].values():
         table["LocusID"] = table["LocusID"].map(new_locusids)
-
+    
     ea = exist_db["allele"].set_index(["LocusID", "sequence", "allele_length"])
     na = new_db["allele"].set_index(["LocusID", "sequence", "allele_length"])
     new_allele = (ea.merge(na, how='outer', left_index=True, right_index=True)

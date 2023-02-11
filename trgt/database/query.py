@@ -1,8 +1,10 @@
 """
-Standard, basic queries
+Basic queries on a tdb
 """
 import os
+import sys
 import argparse
+import joblib
 import pandas as pd
 import trgt
 
@@ -10,7 +12,7 @@ def allele_count(dbname):
     """
     Locus - allele number - allele count
     """
-    data = trgt.load_tdb(dbname)
+    data = trgt.load_tdb(dbname, decode=False)
 
     # For a single sample, get how many times an allele is found
     ac = data['allele'][["LocusID", "allele_number"]].copy()
@@ -24,7 +26,7 @@ def allele_count(dbname):
     ac = allele_count.reset_index()
     view = data['locus'].join(ac, on='LocusID', rsuffix="_")
     view['allele_count'] = view['allele_count'].fillna(0)
-    view[["chrom", "start", "end", "allele_number", "allele_count"]].to_csv('/dev/stdout', sep='\t', index=False)
+    return view[["chrom", "start", "end", "allele_number", "allele_count"]]
 
 def allele_seqs(dbname):
     """
@@ -32,17 +34,14 @@ def allele_seqs(dbname):
     """
     tdb_fns = trgt.get_tdb_files(dbname)
     alleles = pd.read_parquet(tdb_fns["allele"])
-    def deseq(x):
-        return trgt.dna_decode(x['sequence'], x['allele_length'])
-    alleles['sequence'] = alleles[~alleles["sequence"].isna()].apply(deseq, axis=0)
-    # Need fasta fetching for reference alleles
-    alleles[["LocusID", "allele_number", "sequence"]].dropna().to_csv("/dev/stdout", sep='\t', index=False)
+    alleles['sequence'] = alleles.apply(trgt.dna_decode_df, axis=1)
+    return alleles[["LocusID", "allele_number", "sequence"]].dropna()
 
 def monz_ref(dbname):
     """
     Monozygotic reference sites per-sample and overall
     """
-    data = trgt.load_tdb(dbname)
+    data = trgt.load_tdb(dbname, decode=False)
 
     out_table = []
     for samp,table in data["sample"].items():
@@ -62,13 +61,13 @@ def monz_ref(dbname):
 
     out_table = pd.DataFrame(out_table, columns=["sample", "loci", "mon_ref"])
     out_table['pct'] = out_table['mon_ref'] / out_table['loci']
-    out_table.to_csv('/dev/stdout', sep='\t', index=False)
+    return out_table
 
 def gtmerge(dbname):
     """
     Collect per-locus genotypes
     """
-    data = trgt.load_tdb(dbname)
+    data = trgt.load_tdb(dbname, decode=False)
     loci = data['locus'].set_index('LocusID')
     snames = {}
     gt_parts = []
@@ -79,41 +78,32 @@ def gtmerge(dbname):
         snames[idx] = samp
         gt_parts.append(gts)
     out = loci.join(pd.concat(gt_parts, axis=1, names=snames).fillna('./.'))
-    out.rename(columns=snames).sort_values(["chrom", "start", "end"]).to_csv("/dev/stdout", sep='\t', index=False)
+    return out.rename(columns=snames).sort_values(["chrom", "start", "end"])
 
-# Can also pass parameters as **kwargs?
-# Though that gets difficult to auto format if we want to expose them
-# unless we override so that -h shows one-liner where --help shows full docs
-# and --help in conjunction with a Q only shows the single query's full docs
 def metadata(dbname):
     """
     Get table properties e.g. row counts and memory/disk sizes (mb)
     """
-    fnames = trgt.get_tdb_files(dbname)
-    data = trgt.load_tdb(dbname)
-    print(f"table\tdisk\tmem\trows")
-    dsize = round(os.path.getsize(fnames['locus']) / 1.0e6, 1)
-    msize = round(data['locus'].memory_usage().sum() / 1.0e6, 1)
-    shape = data['locus'].shape
-    print(f"locus\t{dsize}\t{msize}\t{shape[0]}")
+    def sizes(table, fname, df):
+        dsize = round(os.path.getsize(fname) / 1.0e6, 1)
+        msize = round(df.memory_usage().sum() / 1.0e6, 1)
+        shape = df.shape[0]
+        return [table, dsize, msize, shape]
 
-    dsize = round(os.path.getsize(fnames['allele']) / 1.0e6, 1)
-    msize = round(data['allele'].memory_usage().sum() / 1.0e6, 1)
-    shape = data['allele'].shape
-    print(f"allele\t{dsize}\t{msize}\t{shape[0]}")
+    fnames = trgt.get_tdb_files(dbname)
+    data = trgt.load_tdb(dbname, decode=False)
+    header = ['table', 'disk', 'mem', 'rows']
+    rows = [sizes("locus", fnames['locus'], data['locus']),
+            sizes("allele", fnames['allele'], data['allele'])]
     for samp in fnames['sample']:
-        dsize = round(os.path.getsize(fnames['sample'][samp]) / 1.0e6, 1)
-        msize = round(data['sample'][samp].memory_usage().sum() / 1.0e6, 1)
-        shape = data['sample'][samp].shape
-        print(f"{samp}\t{dsize}\t{msize}\t{shape[0]}")
-       
-QS = {
-    "ac": allele_count,
-    "as": allele_seqs,
-    "monref": monz_ref,
-    "gtmerge": gtmerge,
-    "metadata": metadata,
-    # copy numbers...?
+        rows.append(sizes(samp, fnames['sample'][samp], data['sample'][samp]))
+    return pd.DataFrame(rows, columns=header)
+
+QS = {"ac": allele_count,
+      "as": allele_seqs,
+      "monref": monz_ref,
+      "gtmerge": gtmerge,
+      "metadata": metadata,
 }
 
 USAGE = "TRGT queries:\n" + "\n".join([f"    {k:9}: {t.__doc__.strip()}" for k,t in QS.items()])
@@ -128,5 +118,23 @@ def query_main(args):
                         help="query to run")
     parser.add_argument("dbname", metavar="TDB", type=str,
                         help="TRGT db name")
+    parser.add_argument("-o", "--output", type=str, default='/dev/stdout',
+                        help="Output destination (stdout)")
+    parser.add_argument("-O", "--output-type", default='t', choices=['t', 'c', 'p', 'j'],
+                        help="Output type of [t]sv, [c]sv, [p]arquet, [j]oblib (%(default)s)")
     args = parser.parse_args(args)
-    QS[args.query](args.dbname)
+
+    if args.output_type == 'p' and os.path.exists(args.output):
+        sys.stderr.write("Cannot write parquet to existing file\n")
+        sys.exit(1)
+
+    result = QS[args.query](args.dbname)
+
+    if args.output_type == 't':
+        result.to_csv(args.output, sep='\t', index=False)
+    elif args.output_type == 'c':
+        result.to_csv(args.output, index=False)
+    elif args.output_type == 'p':
+        result.to_parquet(args.output)
+    elif args.output_type == 'j':
+        joblib.dump(result, args.output)
