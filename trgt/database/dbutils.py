@@ -65,14 +65,14 @@ def load_tdb(dbname, samples=None, lfilters=None, afilters=None, sfilters=None):
         if filts is None:
             return n_filt
         if isinstance(filts[0], tuple):
-            return [n_filt, filts]
-        filts.append(n_filt)
+            return n_filt + filts
+        filts.insert(0, n_filt)
         return filts
     names = get_tdb_files(dbname)
     ret = {}
     ret['locus'] = pq.read_table(names['locus'], filters=lfilters).to_pandas()
     if lfilters:
-        loci = [("LocusID", "in", ret['locus']['LocusID'])]
+        loci = [("LocusID", "in", ret['locus']['LocusID'].values)]
         afilters = add_filter(afilters, loci)
         sfilters = add_filter(sfilters, loci)
 
@@ -81,7 +81,7 @@ def load_tdb(dbname, samples=None, lfilters=None, afilters=None, sfilters=None):
     ret['sample'] = {}
     samp_to_fetch = samples if samples is not None else names["sample"].keys()
     for samp in samp_to_fetch:
-        ret['sample'][samp] = pq.read_table(names['sample'][samp], filters=afilters).to_pandas()
+        ret['sample'][samp] = pq.read_table(names['sample'][samp], filters=sfilters).to_pandas()
     return ret
 
 def set_tdb_types(d):
