@@ -4,28 +4,40 @@ Basic queries on a tdb
 import os
 import sys
 import argparse
+
 import joblib
 import pandas as pd
 import trgt
 
-def allele_count(dbname):
+def tdb_opener(foo, *args, **kwargs):
+    """
+    Decorator for turning a tdb file name into a loaded tdb
+    Allows queries to be used from command line or programmatically
+    """
+    def wrapper(data):
+        if isinstance(data, str):
+            data = trgt.load_tdb(data)
+        return foo(data)
+    wrapper.__doc__ = foo.__doc__
+    return wrapper
+
+@tdb_opener
+def allele_count(data):
     """
     Locus - allele number - allele count
     """
-    data = trgt.load_tdb(dbname)
-
     # For a single sample, get how many times an allele is found
     ac = data['allele'][["LocusID", "allele_number"]].copy()
     ac['allele_count'] = 0
-    ac = allele_count.set_index(["LocusID", "allele_number"])
+    ac = ac.set_index(["LocusID", "allele_number"])
 
     for samp_data in data['sample'].values():
         num_samps = samp_data.reset_index().groupby(["LocusID", "allele_number"]).size()
         ac["allele_count"] += num_samps
 
-    ac = allele_count.reset_index()
+    ac = ac.reset_index()
     view = data['locus'].join(ac, on='LocusID', rsuffix="_")
-    view['allele_count'] = view['allele_count'].fillna(0)
+    view['allele_count'] = view['allele_count'].fillna(0).astype(int)
     return view[["chrom", "start", "end", "allele_number", "allele_count"]]
 
 def allele_seqs(dbname):
@@ -37,12 +49,11 @@ def allele_seqs(dbname):
     alleles['sequence'] = alleles.apply(trgt.dna_decode_df, axis=1)
     return alleles[["LocusID", "allele_number", "sequence"]].dropna()
 
-def monz_ref(dbname):
+@tdb_opener
+def monref(data):
     """
     Monozygotic reference sites per-sample and overall
     """
-    data = trgt.load_tdb(dbname)
-
     out_table = []
     for samp,table in data["sample"].items():
         table["is_ref"] = table["allele_number"] == 0
@@ -51,7 +62,6 @@ def monz_ref(dbname):
                           table.groupby(["LocusID"])["is_ref"].all().sum()
                          ])
 
-    # loci that are monozygotic across all samples
     all_sap = pd.concat(data["sample"].values())
     all_sap["is_ref"] = all_sap["allele_number"] == 0
     out_table.append(['all',
@@ -63,7 +73,8 @@ def monz_ref(dbname):
     out_table['pct'] = out_table['mon_ref'] / out_table['loci']
     return out_table
 
-def gtmerge(dbname):
+@tdb_opener
+def gtmerge(data):
     """
     Collect per-locus genotypes
     """
@@ -102,7 +113,7 @@ def metadata(dbname):
 
 QS = {"ac": allele_count,
       "as": allele_seqs,
-      "monref": monz_ref,
+      "monref": monref,
       "gtmerge": gtmerge,
       "metadata": metadata,
 }

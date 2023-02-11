@@ -39,20 +39,49 @@ def get_tdb_files(dbname):
     return {'locus': l_fn, 'allele': a_fn, 'sample': s_dict}
 
 
-def load_tdb(dbname):
+def load_tdb(dbname, samples=None, lfilters=None, afilters=None, sfilters=None):
     """
-    Loads files into dataframes
-    return dict with keys of table name and values of the table(s)
-    Note that 'sample' will have a value sample_name:DataFrame
+    Loads tdb into DataFrames
+    returns dict of {'locus': DataFrame, 'allele': DataFrame, 'sample': {'sname': DataFrame}}
+    
+    If samples is provided, only a subset of sample tables are loaded.
+
+    The (l)ocus, (a)llele, and (s)ample filters are passed to pyarrow.parquet.read_table
+    filters during loading. Filters allow pulling subsets of data and have structure of
+      List[Tuple] or List[List[Tuple]] or None (default)
+
+    From their documentation:
+      Each tuple has format: (key, op, value) and compares the key with the value. The
+    supported op are: = or ==, !=, <, >, <=, >=, in and not in. If the op is in or not in,
+    the value must be a collection such as a list, a set or a tuple.
+
+    If a subset of loci are loaded via lfilters, then a filter of ('LocusID', 'in', loaded_locusids)
+    is added to afilters and sfilters
     """
+    def add_filter(filts, n_filt):
+        """
+        Add a new filter
+        """
+        if filts is None:
+            return n_filt
+        if isinstance(filts[0], tuple):
+            return [n_filt, filts]
+        filts.append(n_filt)
+        return filts
     names = get_tdb_files(dbname)
     ret = {}
-    ret['locus'] = pd.read_parquet(names['locus'])
-    ret['allele'] = pd.read_parquet(names['allele'])
+    ret['locus'] = pq.read_table(names['locus'], filters=lfilters).to_pandas()
+    if lfilters:
+        loci = [("LocusID", "in", ret['locus']['LocusID'])]
+        afilters = add_filter(afilters, loci)
+        sfilters = add_filter(sfilters, loci)
+
+    ret['allele'] = pq.read_table(names['allele'], filters=afilters).to_pandas()
     ret['allele']['sequence'] = ret['allele']['sequence'].apply(bytes)
     ret['sample'] = {}
-    for samp, fn in names['sample'].items():
-        ret['sample'][samp] = pd.read_parquet(fn)
+    samp_to_fetch = samples if samples is not None else names["sample"].keys()
+    for samp in samp_to_fetch:
+        ret['sample'][samp] = pq.read_table(names['sample'][samp], filters=afilters).to_pandas()
     return ret
 
 def set_tdb_types(d):
@@ -192,7 +221,8 @@ def locus_consolidator(exist_db, new_db):
                             .fillna(-1)
                             .astype(int))
     union["LocusID"] = union["LocusID"].astype(int)
-    ret = union.reset_index()[["LocusID", "chrom", "start", "end"]].copy()
+    ret = (union.reset_index()[["LocusID", "chrom", "start", "end"]]
+                .sort_values(["chrom", "start", "end"])).copy()
     return ret, union
 
 def allele_consolidator(exist_db, new_db, consol_locus):
