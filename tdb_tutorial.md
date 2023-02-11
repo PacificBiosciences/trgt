@@ -108,7 +108,13 @@ For example:
 4        0  chr1  30824  30989
 ```
 
-Pandas is very helpful for manipulating data. Here's an example query for collecting all loci with at least 3 alleles
+Some of the trgt queries are available programmatically:
+```python
+ac = trgt.allele_count(data)
+```
+
+Pandas is very helpful for manipulating data and can make building your own queries easy.
+Here's an example query for collecting all loci with at least 3 alleles
 ```python
 loci_count = data['allele'].groupby(["LocusID"]).size()
 min_3_alleles = loci_count[loci_count >= 3]
@@ -117,9 +123,27 @@ data['locus'].set_index("LocusID", inplace=True)
 data['locus'].loc[min_3_alleles.index].head()
 ```
 
-We can also run some of our queries programmatically:
-```python
-ac = trgt.allele_count(data)
+Here's an example for calculating what percent of alleles per-locus have over 20x spanning reads:
+```
+# Build an allele coverage table
+act = data['locus']["LocusID"].copy().to_frame().set_index("LocusID")
+act["Total"] = 0
+act["Covered"] = 0
+
+# Add each sample to the coverage table
+for samp, table in data['sample'].items():
+    act["Total"] = act["Total"].add(table.groupby(["LocusID"]).size(), fill_value=0)
+    act["Covered"] = act["Covered"].add(table[table['spanning_reads'] >= 20].groupby("LocusID").size(), fill_value=0)
+
+# Create a column with the per-locus percent and get the mean.
+act["Percent"] = act["Covered"] / act["Total"]
+act["Percent"].mean()
+```
+
+Note that this measurement of 'average percent of alleles per-locus with >= 20x' is different from the 'total percent of alleles with >= 20x', which would be:
+```
+m_sum = act.sum()
+m_sum['Covered'] / m_sum['Total']
 ```
 
 When loading a tdb, we can pass filters to pyarrow and only load subsets of data.
