@@ -7,22 +7,23 @@ TRGT output vcfs can be collected into a database for easier querying.
 The database comprises a set of parquet files:
 
 - locus.pq: The locations of tandem repeats
--- LocusID: identifier for the locus
--- chrom: chromosome of the locus
--- start: 0-based start position of the locus
--- end: 0-based end position of the locus
+  - LocusID: identifier for the locus
+  - chrom: chromosome of the locus
+  - start: 0-based start position of the locus
+  - end: 0-based end position of the locus
 - allele.pq: Tandem repeat alleles found on a locus
--- LocusID: locus to which the allele belongs
--- allele_number: identifier of the allele on the locus. '0' is the reference allele
--- allele_length: length of the allele
--- sequence: 2bit encoded sequence of the allele
+  - LocusID: locus to which the allele belongs
+  - allele_number: identifier of the allele on the locus. '0' is the reference allele
+  - allele_length: length of the allele
+  - sequence: 2bit encoded sequence of the allele
 - sample.\*.pq: sample properties of alleles
--- LocusID: identifier for the locus
--- allele_number: identifier of the allele on the locus. '0' is the reference allele
--- spanning_reads: number of spanning reads supporting per allele
--- length_range_lower: allele minimum predicted length
--- length_range_upper: allele maximum predicted length
+  - LocusID: identifier for the locus
+  - allele_number: identifier of the allele on the locus. '0' is the reference allele
+  - spanning_reads: number of spanning reads supporting per allele
+  - length_range_lower: allele minimum predicted length
+  - length_range_upper: allele maximum predicted length
 
+These tables are stored in a directory with a `.tdb` extension.
 
 Creating a database
 ===================
@@ -93,7 +94,7 @@ For example:
 ```
 
 Pandas is very helpful for manipulating data. Here's an example query for collecting all loci with at least 3 alleles
-```
+```python
 loci_count = data['allele'].groupby(["LocusID"]).size()
 min_3_alleles = loci_count[loci_count >= 3]
 
@@ -107,7 +108,7 @@ ac = trgt.allele_count(data)
 ```
 
 When loading a tdb, we can pass filters to pyarrow and only load subsets of data.
-```
+```python
 chr1 = trgt.load_tdb("family.tdb",
 		samples=['son', 'mother'],
 		lfilters=[("chrom", "=", "chr1"), ("start", ">", 71685300), ("end", "<", 72497289)],
@@ -116,6 +117,6 @@ chr1 = trgt.load_tdb("family.tdb",
 See `help(trgt.load_tdb)` for details on the filters.
 
 To decode allele sequences to a string
-```
+```python
 sequences = data['allele'].apply(trgt.dna_decode_df, axis=1)
 ```
