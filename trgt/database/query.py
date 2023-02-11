@@ -12,7 +12,7 @@ def allele_count(dbname):
     """
     Locus - allele number - allele count
     """
-    data = trgt.load_tdb(dbname, decode=False)
+    data = trgt.load_tdb(dbname)
 
     # For a single sample, get how many times an allele is found
     ac = data['allele'][["LocusID", "allele_number"]].copy()
@@ -41,7 +41,7 @@ def monz_ref(dbname):
     """
     Monozygotic reference sites per-sample and overall
     """
-    data = trgt.load_tdb(dbname, decode=False)
+    data = trgt.load_tdb(dbname)
 
     out_table = []
     for samp,table in data["sample"].items():
@@ -67,7 +67,7 @@ def gtmerge(dbname):
     """
     Collect per-locus genotypes
     """
-    data = trgt.load_tdb(dbname, decode=False)
+    data = trgt.load_tdb(dbname)
     loci = data['locus'].set_index('LocusID')
     snames = {}
     gt_parts = []
@@ -85,13 +85,14 @@ def metadata(dbname):
     Get table properties e.g. row counts and memory/disk sizes (mb)
     """
     def sizes(table, fname, df):
-        dsize = round(os.path.getsize(fname) / 1.0e6, 1)
-        msize = round(df.memory_usage().sum() / 1.0e6, 1)
+        denom = 1.0e6 #mega
+        dsize = round(os.path.getsize(fname) / denom, 2)
+        msize = round(df.memory_usage().sum() / denom, 2)
         shape = df.shape[0]
         return [table, dsize, msize, shape]
 
     fnames = trgt.get_tdb_files(dbname)
-    data = trgt.load_tdb(dbname, decode=False)
+    data = trgt.load_tdb(dbname)
     header = ['table', 'disk', 'mem', 'rows']
     rows = [sizes("locus", fnames['locus'], data['locus']),
             sizes("allele", fnames['allele'], data['allele'])]
