@@ -1,29 +1,44 @@
 TRGTdb tutorial
 ===============
-
-
 TRGT output vcfs can be collected into a database for easier querying.
 
-The database comprises a set of parquet files:
+The database comprises a set directory with a `.tdb` extension containing a set of parquet files. For example:
+```
+project.tdb/
+├── locus.pq
+├── allele.pq
+├── sample.hg002.pq
+├── sample.hg003.pq
+└── sample.hg004.pq
+```
 
-- locus.pq: The locations of tandem repeats
-  - LocusID: identifier for the locus
-  - chrom: chromosome of the locus
-  - start: 0-based start position of the locus
-  - end: 0-based end position of the locus
-- allele.pq: Tandem repeat alleles found on a locus
-  - LocusID: locus to which the allele belongs
-  - allele_number: identifier of the allele on the locus. '0' is the reference allele
-  - allele_length: length of the allele
-  - sequence: 2bit encoded sequence of the allele
-- sample.\*.pq: sample properties of alleles
-  - LocusID: identifier for the locus
-  - allele_number: identifier of the allele on the locus. '0' is the reference allele
-  - spanning_reads: number of spanning reads supporting per allele
-  - length_range_lower: allele minimum predicted length
-  - length_range_upper: allele maximum predicted length
+Table Descriptions
+-------------------
+locus.pq: The locations of tandem repeats
+| column  | definition                           |
+|---------|--------------------------------------|
+| LocusID | identifier for the locus             |
+| chrom   | chromosome of the locus              |
+| start   | 0-based start position of the locus  |
+| end     | 0-based end position of the locus    |
 
-These tables are stored in a directory with a `.tdb` extension.
+allele.pq: Tandem repeat alleles found on a locus
+| column        | definition                           |
+|---------------|--------------------------------------|
+| LocusID       | locus to which the allele belongs    |
+| allele_number | identifier of the allele on the locus. '0' is the reference allele |
+| allele_length | length of the allele                 |
+| sequence      | 2bit encoded sequence of the allele  |
+
+sample.\*.pq: sample properties of alleles
+| column             | definition                           |
+|--------------------|--------------------------------------|
+| LocusID            | identifier for the locus             |
+| allele_number      | identifier of the allele on the locus. '0' is the reference allele |
+| spanning_reads     | number of spanning reads supporting per allele |
+| length_range_lower | allele minimum predicted length      |
+| length_range_upper | allele maximum predicted length      |
+
 
 Creating a database
 ===================
@@ -52,7 +67,7 @@ Once we have a database created, we can then perform standard queries.
 - gtmerge  : Collect per-locus genotypes
 - metadata : Get table properties e.g. row counts and memory/disk sizes (mb)
 
-By default, results are written as a tsv to stdout. The output can be customized with `-O` and `-o`.
+By default, results are written as a tsv to stdout. The output can be redirected to a file with `--output` (`-o`) and output with multiple formats using `--output-type` (`-O`).
 ```bash
 trgt db query gtmerge family.tdb -O c -o genotypes.csv
 ```
@@ -111,7 +126,9 @@ When loading a tdb, we can pass filters to pyarrow and only load subsets of data
 ```python
 chr1 = trgt.load_tdb("family.tdb",
 		samples=['son', 'mother'],
-		lfilters=[("chrom", "=", "chr1"), ("start", ">", 71685300), ("end", "<", 72497289)],
+		lfilters=[("chrom", "=", "chr1"), 
+		          ("start", ">", 71685300),
+			  ("end", "<", 72497289)],
 		afilters=[("allele_length", ">=", 1000)])
 ```
 See `help(trgt.load_tdb)` for details on the filters.
