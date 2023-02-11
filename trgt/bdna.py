@@ -5,7 +5,7 @@ from io import BytesIO
 
 NUCS = {'A':0, 'G':1, 'C':2, 'T':3}
 NUCSi = list(NUCS.keys())
-def dna_encode(seq):
+def dna_encode_bytes(seq):
     """
     Turn a string of DNA to bytes
     """
@@ -19,7 +19,7 @@ def dna_encode(seq):
     ret.seek(0)
     return ret.read()
 
-def dna_encode_array(seq):
+def dna_encode(seq):
     """
     Turn a string of DNA to uint8 array
     This actually makes it smaller, but then it becomes difficult to consolidate alleles
@@ -30,7 +30,13 @@ def dna_encode_array(seq):
         for pos, nuc in enumerate(seq[i:i+4]):
             byte += NUCS[nuc] << pos * 2
         ret.append(byte)
-    return tuple(ret)
+    return ret
+
+def dna_decode_df(x):
+    """
+    decode the sequence of an allele table row
+    """
+    return dna_decode(x['sequence'], x['allele_length'])
 
 def dna_decode(bstr, m_len):
     """

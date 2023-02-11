@@ -12,7 +12,7 @@ def allele_count(dbname):
     """
     Locus - allele number - allele count
     """
-    data = trgt.load_tdb(dbname)
+    data = trgt.load_tdb(dbname, decode=False)
 
     # For a single sample, get how many times an allele is found
     ac = data['allele'][["LocusID", "allele_number"]].copy()
@@ -34,16 +34,14 @@ def allele_seqs(dbname):
     """
     tdb_fns = trgt.get_tdb_files(dbname)
     alleles = pd.read_parquet(tdb_fns["allele"])
-    def deseq(x):
-        return trgt.dna_decode(x['sequence'], x['allele_length'])
-    alleles['sequence'] = alleles[~alleles["sequence"].isna()].apply(deseq, axis=0)
+    alleles['sequence'] = alleles.apply(trgt.dna_decode_df, axis=1)
     return alleles[["LocusID", "allele_number", "sequence"]].dropna()
 
 def monz_ref(dbname):
     """
     Monozygotic reference sites per-sample and overall
     """
-    data = trgt.load_tdb(dbname)
+    data = trgt.load_tdb(dbname, decode=False)
 
     out_table = []
     for samp,table in data["sample"].items():
@@ -69,7 +67,7 @@ def gtmerge(dbname):
     """
     Collect per-locus genotypes
     """
-    data = trgt.load_tdb(dbname)
+    data = trgt.load_tdb(dbname, decode=False)
     loci = data['locus'].set_index('LocusID')
     snames = {}
     gt_parts = []
@@ -93,7 +91,7 @@ def metadata(dbname):
         return [table, dsize, msize, shape]
 
     fnames = trgt.get_tdb_files(dbname)
-    data = trgt.load_tdb(dbname)
+    data = trgt.load_tdb(dbname, decode=False)
     header = ['table', 'disk', 'mem', 'rows']
     rows = [sizes("locus", fnames['locus'], data['locus']),
             sizes("allele", fnames['allele'], data['allele'])]

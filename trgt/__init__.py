@@ -3,6 +3,7 @@ Tandem repeat genotyping and visualization from PacBio HiFi data
 """
 from trgt.bdna import (
     dna_decode,
+    dna_decode_df,
     dna_encode
 )
 
