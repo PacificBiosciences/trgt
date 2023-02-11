@@ -15,3 +15,9 @@ from trgt.database.dbutils import (
     tdb_consolidate,
     vcf_to_tdb,
 )
+
+from trgt.database.query import (
+    allele_count,
+    monref,
+    gtmerge,
+)

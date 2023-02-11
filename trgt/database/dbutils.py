@@ -25,6 +25,7 @@ def get_tdb_samplenames(file):
         ret.append(os.path.basename(i)[len('sample.'):-len('.pq')])
     return ret
 
+
 def get_tdb_files(dbname):
     """
     Return names of parquet table files in a tdb
@@ -38,23 +39,49 @@ def get_tdb_files(dbname):
     return {'locus': l_fn, 'allele': a_fn, 'sample': s_dict}
 
 
-def load_tdb(dbname, decode=True):
+def load_tdb(dbname, samples=None, lfilters=None, afilters=None, sfilters=None):
     """
-    Loads files into dataframes
-    return dict with keys of table name and values of the table(s)
-    Note that 'sample' will have a value sample_name:DataFrame
+    Loads tdb into DataFrames
+    returns dict of {'locus': DataFrame, 'allele': DataFrame, 'sample': {'sname': DataFrame}}
+    
+    If samples is provided, only a subset of sample tables are loaded.
 
-    if decode, turn the encoded allele.sequence into a string
+    The (l)ocus, (a)llele, and (s)ample filters are passed to pyarrow.parquet.read_table
+    filters during loading. Filters allow pulling subsets of data and have structure of
+      List[Tuple] or List[List[Tuple]] or None (default)
+
+    From their documentation:
+      Each tuple has format: (key, op, value) and compares the key with the value. The
+    supported op are: = or ==, !=, <, >, <=, >=, in and not in. If the op is in or not in,
+    the value must be a collection such as a list, a set or a tuple.
+
+    If a subset of loci are loaded via lfilters, then a filter of ('LocusID', 'in', loaded_locusids)
+    is added to afilters and sfilters
     """
+    def add_filter(filts, n_filt):
+        """
+        Add a new filter
+        """
+        if filts is None:
+            return n_filt
+        if isinstance(filts[0], tuple):
+            return n_filt + filts
+        filts.insert(0, n_filt)
+        return filts
     names = get_tdb_files(dbname)
     ret = {}
-    ret['locus'] = pd.read_parquet(names['locus'])
-    ret['allele'] = pd.read_parquet(names['allele'])
-    if decode:
-        ret['allele']['sequence'] = ret['allele'].apply(trgt.dna_decode_df, axis=1)
+    ret['locus'] = pq.read_table(names['locus'], filters=lfilters).to_pandas()
+    if lfilters:
+        loci = [("LocusID", "in", ret['locus']['LocusID'].values)]
+        afilters = add_filter(afilters, loci)
+        sfilters = add_filter(sfilters, loci)
+
+    ret['allele'] = pq.read_table(names['allele'], filters=afilters).to_pandas()
+    ret['allele']['sequence'] = ret['allele']['sequence'].apply(bytes)
     ret['sample'] = {}
-    for samp, fn in names['sample'].items():
-        ret['sample'][samp] = pd.read_parquet(fn)
+    samp_to_fetch = samples if samples is not None else names["sample"].keys()
+    for samp in samp_to_fetch:
+        ret['sample'][samp] = pq.read_table(names['sample'][samp], filters=sfilters).to_pandas()
     return ret
 
 def set_tdb_types(d):
@@ -64,18 +91,15 @@ def set_tdb_types(d):
     l_types = {"LocusID": np.uint32,
                "chrom": str,
                "start": np.uint32,
-               "end": np.uint32
-               }
+               "end": np.uint32}
     a_types = {"LocusID": np.uint32,
                "allele_number": np.uint16,
-               "allele_length": np.uint16,
-               # "sequence": np.bytes_ this truncates for some reason
-               }
+               "allele_length": np.uint16}
     s_types = {"LocusID": np.uint32,
                "allele_number": np.uint16,
                "spanning_reads": np.uint16,
-               "ALCI_lower": np.uint16,
-               "ALCI_upper": np.uint16}
+               "length_range_lower": np.uint16,
+               "length_range_upper": np.uint16}
     d['locus'] = d['locus'].astype(l_types)
 
     d['allele'] = d['allele'].astype(a_types)
@@ -96,7 +120,7 @@ def dump_tdb(data, output):
     data['locus'].to_parquet(pq_fns['locus'], index=False, compression='gzip')
 
     allele = pa.Table.from_pandas(data['allele'][["LocusID", "allele_number", "allele_length"]])
-    seq = pa.Int8Array.from_pandas(data['allele']['sequence'].apply(trgt.dna_encode), type=pa.list_(pa.uint8()))
+    seq = pa.Int8Array.from_pandas(data['allele']['sequence'], type=pa.list_(pa.uint8()))
     allele = allele.set_column(3, 'sequence', seq)
     a_schema = pa.schema([('LocusID', pa.uint32()),
                           ('allele_number', pa.uint16()),
@@ -110,7 +134,7 @@ def dump_tdb(data, output):
     for sample, value in data['sample'].items():
         value.to_parquet(os.path.join(output, f"sample.{sample}.pq"), index=False, compression='gzip')
 
-def pull_alleles(data, encode=False):
+def pull_alleles(data):
     """
     Turn alleles into a table
     """
@@ -130,9 +154,7 @@ def pull_alleles(data, encode=False):
     alleles = (alleles.sort_values(["LocusID", "allele_number"])
                     [["LocusID", "allele_number", "allele_length", "sequence"]]
                     .reset_index(drop=True))
-    if encode:
-        #alleles['sequence'] = alleles['sequence'].where(~alleles['sequence'].isna(), [])
-        alleles['sequence'] = alleles[~alleles['sequence'].isna()]['sequence'].apply(trgt.dna_encode)
+    alleles['sequence'] = alleles[~alleles['sequence'].isna()]['sequence'].apply(trgt.dna_encode)
 
     return alleles
 
@@ -140,19 +162,20 @@ def pull_saps(data, sample):
     """
     Turn sample allele properties into a table
     """
+    # Remove sites with uninformative genotype information
+    data = data[~data[f'{sample}_GT'].isin([(None,)])]
     gt = pd.DataFrame(data[f"{sample}_GT"].to_list(), columns=["GT1", "GT2"], index=data.index)
     span = pd.DataFrame(data[f"{sample}_SD"].to_list(), columns=["SD1", "SD2"], index=data.index)
-    alci = pd.DataFrame(data[f"{sample}_ALCI"].to_list(), columns=["ALCI1", "ALCI2"], index=data.index)
+    alci = pd.DataFrame(data[f"{sample}_ALLR"].to_list(), columns=["LR1", "LR2"], index=data.index)
     sap = pd.concat([data[["LocusID"]], span, alci, gt], axis=1)
 
     renamer = {"SD1": "spanning_reads", "SD2": "spanning_reads",
-               "ALCI1":"ALCI", "ALCI2":"ALCI", "GT1":"allele_number", "GT2":"allele_number"}
-    sap1 = sap[["LocusID", "GT1", "SD1", "ALCI1"]].rename(columns=renamer)
-    sap2 = sap[["LocusID", "GT2", "SD2", "ALCI2"]].rename(columns=renamer)
-    sap = pd.concat([sap1, sap2], axis=0)
-    sap[["ALCI_lower", "ALCI_upper"]] = sap["ALCI"].str.split('-', expand=True).astype(int)
-    sap = sap.drop(columns=["ALCI"])
-    return sap.reset_index(drop=True)
+               "LR1":"LR", "LR2":"LR", "GT1":"allele_number", "GT2":"allele_number"}
+    sap = pd.concat([sap[["LocusID", "GT1", "SD1", "LR1"]].rename(columns=renamer),
+                     sap[["LocusID", "GT2", "SD2", "LR2"]].rename(columns=renamer)],
+                     axis=0)
+    sap[["length_range_lower", "length_range_upper"]] = sap["LR"].str.split('-', expand=True).astype(int)
+    return sap.drop(columns=["LR"]).reset_index(drop=True)
 
 def vcf_to_tdb(vcf_fn):
     """
@@ -169,7 +192,7 @@ def vcf_to_tdb(vcf_fn):
     ret["locus"] = data[["LocusID", "chrom", "start", "end"]].reset_index(drop=True).copy()  # pylint: disable=unsubscriptable-object # pylint/issues/3139
 
     logging.info("Wrangling alleles")
-    allele_df = pull_alleles(data, encode=False)
+    allele_df = pull_alleles(data)
     ret["allele"] = allele_df
     logging.info("allele count:\t%d", len(allele_df))
 
@@ -198,7 +221,8 @@ def locus_consolidator(exist_db, new_db):
                             .fillna(-1)
                             .astype(int))
     union["LocusID"] = union["LocusID"].astype(int)
-    ret = union.reset_index()[["LocusID", "chrom", "start", "end"]].copy()
+    ret = (union.reset_index()[["LocusID", "chrom", "start", "end"]]
+                .sort_values(["chrom", "start", "end"])).copy()
     return ret, union
 
 def allele_consolidator(exist_db, new_db, consol_locus):
@@ -210,7 +234,7 @@ def allele_consolidator(exist_db, new_db, consol_locus):
 
     for table in new_db["sample"].values():
         table["LocusID"] = table["LocusID"].map(new_locusids)
-    
+
     ea = exist_db["allele"].set_index(["LocusID", "sequence", "allele_length"])
     na = new_db["allele"].set_index(["LocusID", "sequence", "allele_length"])
     new_allele = (ea.merge(na, how='outer', left_index=True, right_index=True)
@@ -241,7 +265,7 @@ def sample_consolidator(exist_db, new_db, allele_lookup):
                         .reset_index()
                         .drop(columns="allele_number")
                         .rename(columns={"n_an":"allele_number"})
-                    )[["LocusID", "allele_number", "spanning_reads", "ALCI_lower", "ALCI_upper"]].copy()
+                    )[["LocusID", "allele_number", "spanning_reads", "length_range_lower", "length_range_upper"]].copy()
         gt_count += len(ret[sample])
     return ret, gt_count
 

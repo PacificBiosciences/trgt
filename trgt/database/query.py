@@ -4,29 +4,40 @@ Basic queries on a tdb
 import os
 import sys
 import argparse
+
 import joblib
 import pandas as pd
 import trgt
 
-def allele_count(dbname):
+def tdb_opener(foo, *args, **kwargs):
     """
-    Locus - allele number - allele count
+    Decorator for turning a tdb file name into a loaded tdb
+    Allows queries to be used from command line or programmatically
     """
-    data = trgt.load_tdb(dbname, decode=False)
+    def wrapper(data):
+        if isinstance(data, str):
+            data = trgt.load_tdb(data)
+        return foo(data)
+    wrapper.__doc__ = foo.__doc__
+    return wrapper
 
-    # For a single sample, get how many times an allele is found
+@tdb_opener
+def allele_count(data):
+    """
+    Locus - allele number - sample count
+    """
     ac = data['allele'][["LocusID", "allele_number"]].copy()
-    ac['allele_count'] = 0
-    ac = allele_count.set_index(["LocusID", "allele_number"])
+    ac['sample_count'] = 0
+    ac = ac.set_index(["LocusID", "allele_number"])
 
     for samp_data in data['sample'].values():
         num_samps = samp_data.reset_index().groupby(["LocusID", "allele_number"]).size()
-        ac["allele_count"] += num_samps
+        ac["sample_count"] += num_samps
 
-    ac = allele_count.reset_index()
+    ac = ac.reset_index()
     view = data['locus'].join(ac, on='LocusID', rsuffix="_")
-    view['allele_count'] = view['allele_count'].fillna(0)
-    return view[["chrom", "start", "end", "allele_number", "allele_count"]]
+    view['sample_count'] = view['sample_count'].fillna(0).astype(int)
+    return view[["chrom", "start", "end", "allele_number", "sample_count"]]
 
 def allele_seqs(dbname):
     """
@@ -37,12 +48,11 @@ def allele_seqs(dbname):
     alleles['sequence'] = alleles.apply(trgt.dna_decode_df, axis=1)
     return alleles[["LocusID", "allele_number", "sequence"]].dropna()
 
-def monz_ref(dbname):
+@tdb_opener
+def monref(data):
     """
     Monozygotic reference sites per-sample and overall
     """
-    data = trgt.load_tdb(dbname, decode=False)
-
     out_table = []
     for samp,table in data["sample"].items():
         table["is_ref"] = table["allele_number"] == 0
@@ -51,7 +61,6 @@ def monz_ref(dbname):
                           table.groupby(["LocusID"])["is_ref"].all().sum()
                          ])
 
-    # loci that are monozygotic across all samples
     all_sap = pd.concat(data["sample"].values())
     all_sap["is_ref"] = all_sap["allele_number"] == 0
     out_table.append(['all',
@@ -63,11 +72,12 @@ def monz_ref(dbname):
     out_table['pct'] = out_table['mon_ref'] / out_table['loci']
     return out_table
 
-def gtmerge(dbname):
+@tdb_opener
+def gtmerge(data):
     """
     Collect per-locus genotypes
     """
-    data = trgt.load_tdb(dbname, decode=False)
+    data = trgt.load_tdb(dbname)
     loci = data['locus'].set_index('LocusID')
     snames = {}
     gt_parts = []
@@ -77,7 +87,7 @@ def gtmerge(dbname):
                     .apply((lambda x: f"{x[0]:.0f}/{x[1]:.0f}"), axis=1))
         snames[idx] = samp
         gt_parts.append(gts)
-    out = loci.join(pd.concat(gt_parts, axis=1, names=snames).fillna('./.'))
+    out = loci.join(pd.concat(gt_parts, axis=1, names=snames)).fillna('./.')
     return out.rename(columns=snames).sort_values(["chrom", "start", "end"])
 
 def metadata(dbname):
@@ -85,13 +95,14 @@ def metadata(dbname):
     Get table properties e.g. row counts and memory/disk sizes (mb)
     """
     def sizes(table, fname, df):
-        dsize = round(os.path.getsize(fname) / 1.0e6, 1)
-        msize = round(df.memory_usage().sum() / 1.0e6, 1)
+        denom = 1.0e6 #mega
+        dsize = round(os.path.getsize(fname) / denom, 2)
+        msize = round(df.memory_usage().sum() / denom, 2)
         shape = df.shape[0]
         return [table, dsize, msize, shape]
 
     fnames = trgt.get_tdb_files(dbname)
-    data = trgt.load_tdb(dbname, decode=False)
+    data = trgt.load_tdb(dbname)
     header = ['table', 'disk', 'mem', 'rows']
     rows = [sizes("locus", fnames['locus'], data['locus']),
             sizes("allele", fnames['allele'], data['allele'])]
@@ -101,7 +112,7 @@ def metadata(dbname):
 
 QS = {"ac": allele_count,
       "as": allele_seqs,
-      "monref": monz_ref,
+      "monref": monref,
       "gtmerge": gtmerge,
       "metadata": metadata,
 }
