@@ -2,7 +2,7 @@ TRGTdb tutorial
 ===============
 TRGT output vcfs can be collected into a database for easier querying.
 
-The database comprises a set directory with a `.tdb` extension containing a set of parquet files. For example:
+The database is a directory with a `.tdb` extension containing a set of parquet files. For example:
 ```
 project.tdb/
 ├── locus.pq
@@ -11,6 +11,7 @@ project.tdb/
 ├── sample.hg003.pq
 └── sample.hg004.pq
 ```
+This structure enables 'deidentification' of results with a simple `rm project.tdb/sample.*.pq`
 
 Table Descriptions
 -------------------
