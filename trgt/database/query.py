@@ -77,7 +77,6 @@ def gtmerge(data):
     """
     Collect per-locus genotypes
     """
-    data = trgt.load_tdb(dbname)
     loci = data['locus'].set_index('LocusID')
     snames = {}
     gt_parts = []
