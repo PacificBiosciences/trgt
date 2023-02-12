@@ -7,9 +7,9 @@ The database is a directory with a `.tdb` extension containing a set of parquet 
 project.tdb/
 ├── locus.pq
 ├── allele.pq
-├── sample.hg002.pq
-├── sample.hg003.pq
-└── sample.hg004.pq
+├── sample.HG002.pq
+├── sample.HG003.pq
+└── sample.HG004.pq
 ```
 This structure enables 'deidentification' of results with a simple `rm project.tdb/sample.*.pq`
 
