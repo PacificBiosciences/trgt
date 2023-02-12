@@ -91,9 +91,9 @@ This returns a dictionary with structure
   { "locus": pandas.DataFrame,
     "allele": pandas.DataFrame,
     "sample": {
-    	"son":pandas.DataFrame, 
-    	"father":pandas.DataFrame, 
-    	"mother":pandas.DataFrame, 
+    	"son": pandas.DataFrame, 
+    	"father": pandas.DataFrame, 
+    	"mother": pandas.DataFrame, 
     }
   }
 ```
