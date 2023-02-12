@@ -125,7 +125,7 @@ data['locus'].loc[min_3_alleles.index].head()
 ```
 
 Here's an example for calculating what percent of alleles per-locus have over 20x spanning reads:
-```
+```python
 # Build an allele coverage table
 act = data['locus']["LocusID"].copy().to_frame().set_index("LocusID")
 act["Total"] = 0
@@ -142,7 +142,7 @@ act["Percent"].mean()
 ```
 
 Note that this measurement of 'average percent of alleles per-locus with >= 20x' is different from the 'total percent of alleles with >= 20x', which would be:
-```
+```python
 m_sum = act.sum()
 m_sum['Covered'] / m_sum['Total']
 ```
