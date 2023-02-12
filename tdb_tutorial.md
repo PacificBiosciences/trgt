@@ -87,20 +87,23 @@ data = trgt.load_tdb("family.tdb")
 ```
 
 This returns a dictionary with structure
-```
-  { "locus": pandas.DataFrame,
-    "allele": pandas.DataFrame,
-    "sample": {
-    	"son": pandas.DataFrame, 
-    	"father": pandas.DataFrame, 
-    	"mother": pandas.DataFrame, 
-    }
+```python
+{
+  "locus": pandas.DataFrame,
+  "allele": pandas.DataFrame,
+  "sample": {
+    "son": pandas.DataFrame, 
+    "father": pandas.DataFrame, 
+    "mother": pandas.DataFrame, 
   }
+}
 ```
 
-For example:
+Accessing the DataFrame:
 ```python
->>> data['locus'].head()
+data['locus'].head()
+```
+```text
    LocusID chrom  start    end
 0        3  chr1  16682  16774
 1        9  chr1  19275  19473
