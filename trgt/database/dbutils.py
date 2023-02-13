@@ -151,11 +151,10 @@ def pull_alleles(data):
                     .drop_duplicates(subset=["LocusID", "sequence"]))
     alleles["allele_length"] = alleles["sequence"].str.len()
     alleles.loc[alleles["allele_number"] == 0, "sequence"] = ""
+    alleles['sequence'] = alleles[~alleles['sequence'].isna()]['sequence'].apply(trgt.dna_encode)
     alleles = (alleles.sort_values(["LocusID", "allele_number"])
                     [["LocusID", "allele_number", "allele_length", "sequence"]]
                     .reset_index(drop=True))
-    alleles['sequence'] = alleles[~alleles['sequence'].isna()]['sequence'].apply(trgt.dna_encode)
-
     return alleles
 
 def pull_saps(data, sample):
