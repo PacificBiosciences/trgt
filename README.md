@@ -18,7 +18,9 @@ the program.
 
 ## Documentation
 
-- [Introductory tutorial](docs/tutorial.md)
+- Tutorials
+  - [Introductory tutorial](docs/tutorial.md)
+  - [Interpreting TRVZ plots](docs/trvz-plots.md)
 - Reference
   - [Command-line interface](docs/cli.md)
   - [Repeat definition file](docs/repeat_files.md)
