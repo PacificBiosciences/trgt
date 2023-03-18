@@ -184,7 +184,7 @@ def vcf_to_tdb(vcf_fn):
         raise RuntimeError(f"input {vcf_fn} does not exist")
 
     ret = {}
-    data = truvari.vcf_to_df(vcf_fn, with_info=True, with_fmt=True, alleles=True)
+    data = truvari.vcf_to_df(vcf_fn, with_info=True, with_format=True, alleles=True)
     logging.info("locus count:\t%d", len(data))
     data["LocusID"] = range(len(data))
 

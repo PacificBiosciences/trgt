@@ -29,13 +29,14 @@ def allele_count(data):
     ac = data['allele'][["LocusID", "allele_number"]].copy()
     ac['sample_count'] = 0
     ac = ac.set_index(["LocusID", "allele_number"])
-
     for samp_data in data['sample'].values():
         num_samps = samp_data.reset_index().groupby(["LocusID", "allele_number"]).size()
-        ac["sample_count"] += num_samps
+        a, b = ac.align(num_samps, fill_value=0, axis=0)
+        ac["sample_count"] = ac["sample_count"] + b
+        #ac["sample_count"] = ac["sample_count"].add(num_samps, fill_value=0)
 
     ac = ac.reset_index()
-    view = data['locus'].join(ac, on='LocusID', rsuffix="_")
+    view = ac.join(data['locus'], on='LocusID', rsuffix="_")
     view['sample_count'] = view['sample_count'].fillna(0).astype(int)
     return view[["chrom", "start", "end", "allele_number", "sample_count"]]
 

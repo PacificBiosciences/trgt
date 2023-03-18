@@ -28,7 +28,7 @@ setup(
       ]
     },
     install_requires=[
-        # truvari >= 4.0 -- needs to be cut
+        "truvari>=4.0",
         "pysam>=0.15.2",
         "pyarrow==11.0.0",
     ],
