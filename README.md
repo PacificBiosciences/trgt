@@ -18,7 +18,9 @@ the program.
 
 ## Documentation
 
-- [Introductory tutorial](docs/tutorial.md)
+- Tutorials
+  - [Introductory tutorial](docs/tutorial.md)
+  - [Interpreting TRVZ plots](docs/trvz-plots.md)
 - Reference
   - [Command-line interface](docs/cli.md)
   - [Repeat definition file](docs/repeat_files.md)
@@ -47,3 +49,8 @@ extent or within any time frame.
 
 - 0.3.4
   - Improved label spacing in TRVZ plots
+- 0.4.0
+  - Added TRVZ tutorial
+  - Added sample karyotype parameter (`XX` or `XY`)
+  - Renamed VCF genotype field `ALCI` to `ALLR`
+  - Made genotyping algorithm changes to improve accuracy
