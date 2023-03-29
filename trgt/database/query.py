@@ -49,8 +49,8 @@ def allele_seqs(dbname):
     reflen = (alleles[alleles["allele_number"] == 0][["LocusID", "allele_length"]]
           .set_index(["LocusID"]))
     alleles = alleles.set_index(["LocusID"])
-    alleles["ref_diff"] = alleles["allele_length"].astype(int) - reflen["allele_length'".astype(int)
-    return alleles[["LocusID", "allele_number", "ref_diff", "sequence"]].dropna()
+    alleles["ref_diff"] = alleles["allele_length"].astype(int) - reflen["allele_length"].astype(int)
+    return alleles.reset_index()[["LocusID", "allele_number", "ref_diff", "sequence"]].dropna()
 
 @tdb_opener
 def monref(data):
@@ -116,12 +116,22 @@ def metadata(dbname):
 @tdb_opener
 def methyl(data):
     """
-    Allele length, methylation, and CpG density
+    Allele length, methylation, and CpG stats (PMID:3656447)
     """
-    def cg_pct(seq):
-        return (seq.count("CG") + seq.count("GC")) / (len(seq) * 2) if len(seq) else 0
+    def cpg_stats(df):
+        seq = df[0]
+        obs = seq.count("CG")
+        c_count = seq.count("C")
+        g_count = seq.count("G")
+        exp = (c_count * g_count) / len(seq) if len(seq) else 0
+        density = obs * 2 / len(seq) if len(seq) else 0
+        gc_pct = (c_count + g_count) / len(seq) if len(seq) else 0
+        return obs, exp, density, gc_pct
     allele = data['allele'].set_index(["LocusID", "allele_number"])
-    allele["CpG_density"] = allele.apply(trgt.dna_decode_df, axis=1).apply(cg_pct)
+    new_cols = ["CpG_obs", "CpG_exp", "CpG_density", "GC_pct"]
+    allele[new_cols] = (allele.apply(trgt.dna_decode_df, axis=1)
+                            .to_frame()
+                            .apply(cpg_stats, axis=1, result_type='expand'))
 
     parts = []
     for samp in data['sample']:
@@ -129,7 +139,7 @@ def methyl(data):
                         .set_index(["LocusID", "allele_number"])
                         .join(allele)
                         .reset_index()
-                        [["LocusID", "allele_number", "allele_length", "average_methylation", "CpG_density"]]
+                        [["LocusID", "allele_number", "allele_length", "average_methylation"] + new_cols]
                     ))
 
     return pd.concat(parts)
