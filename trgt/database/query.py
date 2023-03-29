@@ -24,7 +24,7 @@ def tdb_opener(foo, *args, **kwargs):
 @tdb_opener
 def allele_count(data):
     """
-    Locus - allele number - sample count
+    Allele sample counts
     """
     ac = data['allele'][["LocusID", "allele_number"]].copy()
     ac['sample_count'] = 0
@@ -33,7 +33,6 @@ def allele_count(data):
         num_samps = samp_data.reset_index().groupby(["LocusID", "allele_number"]).size()
         a, b = ac.align(num_samps, fill_value=0, axis=0)
         ac["sample_count"] = ac["sample_count"] + b
-        #ac["sample_count"] = ac["sample_count"].add(num_samps, fill_value=0)
 
     ac = ac.reset_index()
     view = ac.join(data['locus'], on='LocusID', rsuffix="_")
@@ -42,12 +41,16 @@ def allele_count(data):
 
 def allele_seqs(dbname):
     """
-    Locus - allele number - sequence
+    Allele sequence, length, and difference from reference
     """
     tdb_fns = trgt.get_tdb_files(dbname)
     alleles = pd.read_parquet(tdb_fns["allele"])
     alleles['sequence'] = alleles.apply(trgt.dna_decode_df, axis=1)
-    return alleles[["LocusID", "allele_number", "sequence"]].dropna()
+    reflen = (alleles[alleles["allele_number"] == 0][["LocusID", "allele_length"]]
+          .set_index(["LocusID"]))
+    alleles = alleles.set_index(["LocusID"])
+    alleles["ref_diff"] = alleles["allele_length"].astype(int) - reflen["allele_length'".astype(int)
+    return alleles[["LocusID", "allele_number", "ref_diff", "sequence"]].dropna()
 
 @tdb_opener
 def monref(data):
@@ -131,8 +134,8 @@ def methyl(data):
 
     return pd.concat(parts)
 
-QS = {"ac": allele_count,
-      "as": allele_seqs,
+QS = {"allele_cnts": allele_count,
+      "allele_seqs": allele_seqs,
       "monref": monref,
       "gtmerge": gtmerge,
       "metadata": metadata,
