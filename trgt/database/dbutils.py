@@ -43,7 +43,7 @@ def load_tdb(dbname, samples=None, lfilters=None, afilters=None, sfilters=None):
     """
     Loads tdb into DataFrames
     returns dict of {'locus': DataFrame, 'allele': DataFrame, 'sample': {'sname': DataFrame}}
-    
+
     If samples is provided, only a subset of sample tables are loaded.
 
     The (l)ocus, (a)llele, and (s)ample filters are passed to pyarrow.parquet.read_table
@@ -97,15 +97,16 @@ def set_tdb_types(d):
                "allele_length": np.uint16}
     s_types = {"LocusID": np.uint32,
                "allele_number": np.uint16,
-               "spanning_reads": np.uint16,
-               "length_range_lower": np.uint16,
-               "length_range_upper": np.uint16}
+               "spanning_reads": np.uin16,
+               "length_range_lower": np.uin16,
+               "length_range_upper": np.uin16,
+               "average_methylation": np.uin16}
+
     d['locus'] = d['locus'].astype(l_types)
-
     d['allele'] = d['allele'].astype(a_types)
-
-    for samp, val in d['sample'].items():
-        d['sample'][samp] = val.astype(s_types)
+    # nulls break this
+    #for samp, val in d['sample'].items():
+    #    d['sample'][samp] = val.astype(s_types)
 
 def dump_tdb(data, output):
     """
@@ -131,8 +132,25 @@ def dump_tdb(data, output):
     writer.write_table(allele)
     writer.close()
 
+    s_schema = pa.schema([('LocusID', pa.uint32()),
+                          ('allele_number', pa.uint16()),
+                          ('spanning_reads', pa.uint16()),
+                          ('average_methylation', pa.uint16()),
+                          ('length_range_lower', pa.uint16()),
+                          ('length_range_upper', pa.uint16())
+                        ])
     for sample, value in data['sample'].items():
-        value.to_parquet(os.path.join(output, f"sample.{sample}.pq"), index=False, compression='gzip')
+        o_fn = os.path.join(output, f"sample.{sample}.pq")
+        m_table = pa.Table.from_pandas(value)
+        n_table = []
+        n_names = []
+        for col, dtype in zip(s_schema.names, s_schema.types):
+            n_table.append(pa.compute.cast(m_table[col], dtype))
+            n_names.append(col)
+        n_table = pa.Table.from_arrays(n_table, names=n_names)
+        writer = pq.ParquetWriter(o_fn, s_schema, compression='gzip')
+        writer.write_table(n_table)
+        writer.close()
 
 def pull_alleles(data):
     """
@@ -144,6 +162,8 @@ def pull_alleles(data):
                .drop(columns="variable")
                .dropna()
                .set_index('hash'))
+    # Full deletions without anchor base(?)
+    alleles.loc[alleles["sequence"] == '.', "sequence"] = ""
     alleles["LocusID"] = data["LocusID"]
     alleles["allele_number"] = alleles.groupby(["LocusID"]).cumcount()
     alleles = (alleles.sort_values(["LocusID", "allele_number"])
@@ -166,14 +186,17 @@ def pull_saps(data, sample):
     gt = pd.DataFrame(data[f"{sample}_GT"].to_list(), columns=["GT1", "GT2"], index=data.index)
     span = pd.DataFrame(data[f"{sample}_SD"].to_list(), columns=["SD1", "SD2"], index=data.index)
     alci = pd.DataFrame(data[f"{sample}_ALLR"].to_list(), columns=["LR1", "LR2"], index=data.index)
-    sap = pd.concat([data[["LocusID"]], span, alci, gt], axis=1)
+    meth = pd.DataFrame(data[f"{sample}_AM"].to_list(), columns=["AM1", "AM2"], index=data.index)
+    sap = pd.concat([data[["LocusID"]], span, alci, meth, gt], axis=1)
 
     renamer = {"SD1": "spanning_reads", "SD2": "spanning_reads",
-               "LR1":"LR", "LR2":"LR", "GT1":"allele_number", "GT2":"allele_number"}
-    sap = pd.concat([sap[["LocusID", "GT1", "SD1", "LR1"]].rename(columns=renamer),
-                     sap[["LocusID", "GT2", "SD2", "LR2"]].rename(columns=renamer)],
+               "LR1": "LR", "LR2": "LR",
+               "AM1": "average_methylation", "AM2": "average_methylation",
+               "GT1": "allele_number", "GT2": "allele_number"}
+    sap = pd.concat([sap[["LocusID", "GT1", "SD1", "LR1", "AM1"]].rename(columns=renamer),
+                     sap[["LocusID", "GT2", "SD2", "LR2", "AM2"]].rename(columns=renamer)],
                      axis=0)
-    sap[["length_range_lower", "length_range_upper"]] = sap["LR"].str.split('-', expand=True).astype(int)
+    sap[["length_range_lower", "length_range_upper"]] = sap["LR"].str.split('-', expand=True)
     return sap.drop(columns=["LR"]).reset_index(drop=True)
 
 def vcf_to_tdb(vcf_fn):
@@ -264,7 +287,8 @@ def sample_consolidator(exist_db, new_db, allele_lookup):
                         .reset_index()
                         .drop(columns="allele_number")
                         .rename(columns={"n_an":"allele_number"})
-                    )[["LocusID", "allele_number", "spanning_reads", "length_range_lower", "length_range_upper"]].copy()
+                    )[["LocusID", "allele_number", "spanning_reads", "length_range_lower",
+                       "length_range_upper", "average_methylation"]].copy()
         gt_count += len(ret[sample])
     return ret, gt_count
 
