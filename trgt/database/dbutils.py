@@ -170,7 +170,9 @@ def pull_alleles(data):
                     .reset_index(drop=True)
                     .drop_duplicates(subset=["LocusID", "sequence"]))
     alleles["allele_length"] = alleles["sequence"].str.len()
-    alleles.loc[alleles["allele_number"] == 0, "sequence"] = ""
+    # Masking reference sequence - removing since we not have queries that analyze sequence
+    # and its a pain to add parameters
+    # alleles.loc[alleles["allele_number"] == 0, "sequence"] = ""
     alleles['sequence'] = alleles[~alleles['sequence'].isna()]['sequence'].apply(trgt.dna_encode)
     alleles = (alleles.sort_values(["LocusID", "allele_number"])
                     [["LocusID", "allele_number", "allele_length", "sequence"]]
@@ -197,6 +199,8 @@ def pull_saps(data, sample):
                      sap[["LocusID", "GT2", "SD2", "LR2", "AM2"]].rename(columns=renamer)],
                      axis=0)
     sap[["length_range_lower", "length_range_upper"]] = sap["LR"].str.split('-', expand=True)
+    # chrY has None
+    sap = sap[~sap["allele_number"].isna()]
     return sap.drop(columns=["LR"]).reset_index(drop=True)
 
 def vcf_to_tdb(vcf_fn):

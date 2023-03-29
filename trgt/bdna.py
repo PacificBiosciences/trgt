@@ -2,8 +2,10 @@
 DNA to bytes encoder/decoder
 """
 from io import BytesIO
+from collections import defaultdict
 
-NUCS = {'A':0, 'G':1, 'C':2, 'T':3}
+NUCS = defaultdict(int) # Assumes A for non-standard bases
+NUCS.update({'A':0, 'G':1, 'C':2, 'T':3})
 NUCSi = list(NUCS.keys())
 def dna_encode(seq):
     """

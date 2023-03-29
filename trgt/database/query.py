@@ -42,7 +42,7 @@ def allele_count(data):
 
 def allele_seqs(dbname):
     """
-    Locus - allele_number - sequence
+    Locus - allele number - sequence
     """
     tdb_fns = trgt.get_tdb_files(dbname)
     alleles = pd.read_parquet(tdb_fns["allele"])
@@ -110,11 +110,33 @@ def metadata(dbname):
         rows.append(sizes(samp, fnames['sample'][samp], data['sample'][samp]))
     return pd.DataFrame(rows, columns=header)
 
+@tdb_opener
+def methyl(data):
+    """
+    Allele length, methylation, and CpG density
+    """
+    def cg_pct(seq):
+        return (seq.count("CG") + seq.count("GC")) / (len(seq) * 2) if len(seq) else 0
+    allele = data['allele'].set_index(["LocusID", "allele_number"])
+    allele["CpG_density"] = allele.apply(trgt.dna_decode_df, axis=1).apply(cg_pct)
+
+    parts = []
+    for samp in data['sample']:
+        parts.append((data['sample'][samp]
+                        .set_index(["LocusID", "allele_number"])
+                        .join(allele)
+                        .reset_index()
+                        [["LocusID", "allele_number", "allele_length", "average_methylation", "CpG_density"]]
+                    ))
+
+    return pd.concat(parts)
+
 QS = {"ac": allele_count,
       "as": allele_seqs,
       "monref": monref,
       "gtmerge": gtmerge,
       "metadata": metadata,
+      "methyl": methyl,
 }
 
 USAGE = "TRGT queries:\n" + "\n".join([f"    {k:9}: {t.__doc__.strip()}" for k,t in QS.items()])
