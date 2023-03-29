@@ -97,10 +97,10 @@ def set_tdb_types(d):
                "allele_length": np.uint16}
     s_types = {"LocusID": np.uint32,
                "allele_number": np.uint16,
-               "spanning_reads": np.uin16,
-               "length_range_lower": np.uin16,
-               "length_range_upper": np.uin16,
-               "average_methylation": np.uin16}
+               "spanning_reads": np.uint16,
+               "length_range_lower": np.uint16,
+               "length_range_upper": np.uint16,
+               "average_methylation": np.uint16}
 
     d['locus'] = d['locus'].astype(l_types)
     d['allele'] = d['allele'].astype(a_types)
