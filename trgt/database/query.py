@@ -39,17 +39,22 @@ def allele_count(data):
     view['sample_count'] = view['sample_count'].fillna(0).astype(int)
     return view[["chrom", "start", "end", "allele_number", "sample_count"]]
 
+def variant_length(allele_table):
+    """
+    Calculate variant length as allele's length minus locus' reference allele length
+    """
+    alleles = allele_table.set_index(["LocusID"])
+    reflen = alleles[alleles["allele_number"] == 0]
+    return (alleles["allele_length"].astype(int) - reflen["allele_length"].astype(int)).values
+
 def allele_seqs(dbname):
     """
     Allele sequence, length, and difference from reference
     """
     tdb_fns = trgt.get_tdb_files(dbname)
     alleles = pd.read_parquet(tdb_fns["allele"])
-    alleles['sequence'] = alleles.apply(trgt.dna_decode_df, axis=1)
-    reflen = (alleles[alleles["allele_number"] == 0][["LocusID", "allele_length"]]
-          .set_index(["LocusID"]))
-    alleles = alleles.set_index(["LocusID"])
-    alleles["ref_diff"] = alleles["allele_length"].astype(int) - reflen["allele_length"].astype(int)
+    alleles["sequence"] = alleles.apply(trgt.dna_decode_df, axis=1)
+    alleles["ref_diff"] = variant_length(alleles)
     return alleles.reset_index()[["LocusID", "allele_number", "ref_diff", "sequence"]].dropna()
 
 @tdb_opener

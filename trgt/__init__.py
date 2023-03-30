@@ -20,4 +20,5 @@ from trgt.database.query import (
     allele_count,
     monref,
     gtmerge,
+    variant_length,
 )
