@@ -17,6 +17,7 @@ def get_samples(file):
     """
     if file.endswith((".vcf", ".vcf.gz")):
         return list(pysam.VariantFile(file).header.samples)
+
     return trgt.get_tdb_samplenames(file)
 
 def check_args(args):
@@ -41,10 +42,12 @@ def check_args(args):
             logging.error("expected .vcf .vcf.gz or .tdb")
             check_fail = True
         else: # can only check sample of valid file names
+            old = pysam.set_verbosity(0) # suppress non-indexed warning
             for s in get_samples(i):
                 if s in seen_samples:
                     logging.error(f"input {i} has redundant sample with {seen_samples[i]}")
                 seen_samples[s] = i
+            pysam.set_verbosity(old) # turn back on
     return check_fail
 
 def create_main(args):
@@ -65,8 +68,8 @@ def create_main(args):
         sys.exit(1)
 
     m_data = None
-    for i in args.inputs:
-        logging.info("Loading %s", i)
+    for pos, i in enumerate(args.inputs):
+        logging.info("Loading %s (%d/%d)", i, pos + 1, len(args.inputs))
         n_data = trgt.load_tdb(i) if i.endswith(".tdb") else trgt.vcf_to_tdb(i)
         m_data = n_data if m_data is None else trgt.tdb_consolidate(m_data, n_data)
 

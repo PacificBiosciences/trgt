@@ -211,7 +211,10 @@ def vcf_to_tdb(vcf_fn):
         raise RuntimeError(f"input {vcf_fn} does not exist")
 
     ret = {}
+    old = pysam.set_verbosity(0) # suppressing no-index warning
     data = truvari.vcf_to_df(vcf_fn, with_info=True, with_format=True, alleles=True)
+    pysam.set_verbosity(old)
+
     logging.info("locus count:\t%d", len(data))
     data["LocusID"] = range(len(data))
 
@@ -225,9 +228,11 @@ def vcf_to_tdb(vcf_fn):
     logging.info("Pulling samples")
     ret["sample"] = {}
     gt_count = 0
+    old = pysam.set_verbosity(0) # suppressing no-index warning
     for sample in pysam.VariantFile(vcf_fn).header.samples:
         ret['sample'][sample] = pull_saps(data, sample)
         gt_count += len(ret['sample'][sample])
+    pysam.set_verbosity(old)
     logging.info("genotype count:\t%d", gt_count)
     return ret
 
