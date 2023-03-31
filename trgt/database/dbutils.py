@@ -170,8 +170,9 @@ def pull_alleles(data):
                     .reset_index(drop=True)
                     .drop_duplicates(subset=["LocusID", "sequence"]))
     alleles["allele_length"] = alleles["sequence"].str.len()
-    # Masking reference sequence - removing since we not have queries that analyze sequence
-    # and its a pain to add parameters
+    # Masking reference sequence - removing since we have queries that want to analyze
+    #   reference sequence (methyl, currently) and its a pain to add parameters for 
+    #   reference/reference fetching
     # alleles.loc[alleles["allele_number"] == 0, "sequence"] = ""
     alleles['sequence'] = alleles[~alleles['sequence'].isna()]['sequence'].apply(trgt.dna_encode)
     alleles = (alleles.sort_values(["LocusID", "allele_number"])

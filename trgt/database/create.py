@@ -37,8 +37,8 @@ def check_args(args):
         if not os.path.exists(i):
             logging.error(f"input {i} does not exist")
             check_fail = True
-        if not i.endswith((".vcf", ".vcf.gz", ".tdb")):
-            logging.error("unrecognized file extension on {i}")
+        if not i.rstrip('/').endswith((".vcf", ".vcf.gz", ".tdb")):
+            logging.error(f"unrecognized file extension on {i}")
             logging.error("expected .vcf .vcf.gz or .tdb")
             check_fail = True
         else: # can only check sample of valid file names
