@@ -77,7 +77,7 @@ def load_tdb(dbname, samples=None, lfilters=None, afilters=None, sfilters=None):
         sfilters = add_filter(sfilters, loci)
 
     ret['allele'] = pq.read_table(names['allele'], filters=afilters).to_pandas()
-    ret['allele']['sequence'] = ret['allele']['sequence'].apply(bytes)
+    #ret['allele']['sequence'] = ret['allele']['sequence'].apply(bytes)
     ret['sample'] = {}
     samp_to_fetch = samples if samples is not None else names["sample"].keys()
     for samp in samp_to_fetch:
@@ -119,18 +119,20 @@ def dump_tdb(data, output):
     pq_fns = get_tdb_files(output)
     set_tdb_types(data)
     data['locus'].to_parquet(pq_fns['locus'], index=False, compression='gzip')
+    data['allele'].to_parquet(pq_fns['allele'], index=False, compression='gzip')
 
-    allele = pa.Table.from_pandas(data['allele'][["LocusID", "allele_number", "allele_length"]])
-    seq = pa.Int8Array.from_pandas(data['allele']['sequence'], type=pa.list_(pa.uint8()))
-    allele = allele.set_column(3, 'sequence', seq)
-    a_schema = pa.schema([('LocusID', pa.uint32()),
-                          ('allele_number', pa.uint16()),
-                          ('allele_length', pa.uint16()),
-                          ('sequence', pa.list_(pa.uint8()))
-                         ])
-    writer = pq.ParquetWriter(pq_fns['allele'], a_schema, compression='gzip')
-    writer.write_table(allele)
-    writer.close()
+    # Can't use encode because of Ns - makes alleles redundant which messes up allele_consolidator
+    #allele = pa.Table.from_pandas(data['allele'][["LocusID", "allele_number", "allele_length"]])
+    #seq = pa.Int8Array.from_pandas(data['allele']['sequence'], type=pa.list_(pa.uint8()))
+    #allele = allele.set_column(3, 'sequence', seq)
+    #a_schema = pa.schema([('LocusID', pa.uint32()),
+    #                      ('allele_number', pa.uint16()),
+    #                      ('allele_length', pa.uint16()),
+    #                      ('sequence', pa.list_(pa.uint8()))
+    #                     ])
+    #writer = pq.ParquetWriter(pq_fns['allele'], a_schema, compression='gzip')
+    #writer.write_table(allele)
+    #writer.close()
 
     s_schema = pa.schema([('LocusID', pa.uint32()),
                           ('allele_number', pa.uint16()),
@@ -171,13 +173,19 @@ def pull_alleles(data):
                     .drop_duplicates(subset=["LocusID", "sequence"]))
     alleles["allele_length"] = alleles["sequence"].str.len()
     # Masking reference sequence - removing since we have queries that want to analyze
-    #   reference sequence (methyl, currently) and its a pain to add parameters for 
+    #   reference sequence (methyl, currently) and its a pain to add parameters for
     #   reference/reference fetching
     # alleles.loc[alleles["allele_number"] == 0, "sequence"] = ""
-    alleles['sequence'] = alleles[~alleles['sequence'].isna()]['sequence'].apply(trgt.dna_encode)
+    #assert not alleles[["LocusID", "allele_length", "sequence"]].duplicated().any(), "in dup"
+    #alleles.to_csv('indup.txt', sep='\t')
+    # Can't use encoding...
+    #alleles['sequence'] = alleles[~alleles['sequence'].isna()]['sequence'].apply(trgt.dna_encode)
+    #alleles.to_csv('outdup.txt', sep='\t')
+    #assert not alleles[["LocusID", "allele_length", "sequence"]].duplicated().any(), "out dup"
     alleles = (alleles.sort_values(["LocusID", "allele_number"])
                     [["LocusID", "allele_number", "allele_length", "sequence"]]
                     .reset_index(drop=True))
+    #print(alleles)
     return alleles
 
 def pull_saps(data, sample):
@@ -275,7 +283,6 @@ def allele_consolidator(exist_db, new_db, consol_locus):
                         .drop_duplicates(subset=["LocusID", "allele_number_x", "allele_number_y"]))
 
     new_allele["allele_number"] = (new_allele.groupby(["LocusID"]).cumcount())
-
     allele_lookup = (new_allele[["LocusID", "allele_number_y", "allele_number"]]
                         .dropna()
                         .drop_duplicates()
@@ -311,6 +318,7 @@ def max_dbg(db):
         logging.critical(db['sample'][s][["allele_number", "spanning_reads", "length_range_lower", "length_range_upper",
         "average_methylation"]].max())
 
+import sys
 def tdb_consolidate(exist_db, new_db):
     """
     Combine two tdbs. returns new in-memory tdb
@@ -322,11 +330,12 @@ def tdb_consolidate(exist_db, new_db):
 
     logging.info("Consolidating alleles")
     ret["allele"], allele_lookup = allele_consolidator(exist_db, new_db, consol_locus)
+    assert len(ret['allele']) == len(ret['allele'][["LocusID", "allele_length", "sequence"]].drop_duplicates()), 'differ'
     logging.info("allele count:\t%d", len(ret["allele"]))
 
     logging.info("Consolidating samples")
     ret['sample'], gt_count = sample_consolidator(exist_db, new_db, allele_lookup)
     logging.info("genotype count:\t%d", gt_count)
-    
-    max_dbg(ret)
+
+    #max_dbg(ret)
     return ret

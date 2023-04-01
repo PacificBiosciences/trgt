@@ -53,7 +53,7 @@ def allele_seqs(dbname):
     """
     tdb_fns = trgt.get_tdb_files(dbname)
     alleles = pd.read_parquet(tdb_fns["allele"])
-    alleles["sequence"] = alleles.apply(trgt.dna_decode_df, axis=1)
+    #alleles["sequence"] = alleles.apply(trgt.dna_decode_df, axis=1)
     alleles["ref_diff"] = variant_length(alleles)
     return alleles.reset_index()[["LocusID", "allele_number", "ref_diff", "sequence"]].dropna()
 
@@ -123,8 +123,8 @@ def methyl(data):
     """
     Allele length, methylation, and CpG stats (PMID:3656447)
     """
-    def cpg_stats(df):
-        seq = df[0]
+    def cpg_stats(seq):
+        #seq = df[0]
         obs = seq.count("CG")
         c_count = seq.count("C")
         g_count = seq.count("G")
@@ -134,9 +134,9 @@ def methyl(data):
         return obs, exp, density, gc_pct
     allele = data['allele'].set_index(["LocusID", "allele_number"])
     new_cols = ["CpG_obs", "CpG_exp", "CpG_density", "GC_pct"]
-    allele[new_cols] = (allele.apply(trgt.dna_decode_df, axis=1)
-                            .to_frame()
+    allele[new_cols] = (allele['sequence']#.apply(trgt.dna_decode_df, axis=1)
                             .apply(cpg_stats, axis=1, result_type='expand'))
+                            #.to_frame()
 
     parts = []
     for samp in data['sample']:
