@@ -70,7 +70,7 @@ def create_main(args):
     m_data = None
     for pos, i in enumerate(args.inputs):
         logging.info("Loading %s (%d/%d)", i, pos + 1, len(args.inputs))
-        n_data = trgt.load_tdb(i) if i.endswith(".tdb") else trgt.vcf_to_tdb(i)
+        n_data = trgt.load_tdb(i) if i.rstrip('/').endswith(".tdb") else trgt.vcf_to_tdb(i)
         m_data = n_data if m_data is None else trgt.tdb_consolidate(m_data, n_data)
 
     logging.info("Writing parquet files")

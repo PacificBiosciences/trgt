@@ -135,9 +135,9 @@ def dump_tdb(data, output):
     s_schema = pa.schema([('LocusID', pa.uint32()),
                           ('allele_number', pa.uint16()),
                           ('spanning_reads', pa.uint16()),
-                          ('average_methylation', pa.uint16()),
                           ('length_range_lower', pa.uint16()),
-                          ('length_range_upper', pa.uint16())
+                          ('length_range_upper', pa.uint16()),
+                          ('average_methylation', pa.uint16())
                         ])
     for sample, value in data['sample'].items():
         o_fn = os.path.join(output, f"sample.{sample}.pq")
@@ -267,11 +267,12 @@ def allele_consolidator(exist_db, new_db, consol_locus):
     for table in new_db["sample"].values():
         table["LocusID"] = table["LocusID"].map(new_locusids)
 
-    ea = exist_db["allele"].set_index(["LocusID", "sequence", "allele_length"])
-    na = new_db["allele"].set_index(["LocusID", "sequence", "allele_length"])
+    ea = exist_db["allele"].set_index(["LocusID", "allele_length", "sequence"])
+    na = new_db["allele"].set_index(["LocusID", "allele_length", "sequence"])
     new_allele = (ea.merge(na, how='outer', left_index=True, right_index=True)
                         .reset_index()
-                        .sort_values(["LocusID", "allele_number_x", "allele_number_y"]))
+                        .sort_values(["LocusID", "allele_number_x", "allele_number_y"])
+                        .drop_duplicates(subset=["LocusID", "allele_number_x", "allele_number_y"]))
 
     new_allele["allele_number"] = (new_allele.groupby(["LocusID"]).cumcount())
 
@@ -279,7 +280,7 @@ def allele_consolidator(exist_db, new_db, consol_locus):
                         .dropna()
                         .drop_duplicates()
                         .rename(columns={"allele_number": "n_an", "allele_number_y":"allele_number"})
-                        .set_index(["LocusID", "allele_number"]))
+                        .set_index(["LocusID", "allele_number"])).copy()
     ret = new_allele[["LocusID", "allele_number", "allele_length", "sequence"]].copy()
 
     return ret, allele_lookup
@@ -302,6 +303,14 @@ def sample_consolidator(exist_db, new_db, allele_lookup):
         gt_count += len(ret[sample])
     return ret, gt_count
 
+def max_dbg(db):
+    #logging.critical(db['locus'].max())
+    logging.critical(db['allele'][["allele_number", "allele_length"]].max())
+    for s in db['sample']:
+        logging.critical(s)
+        logging.critical(db['sample'][s][["allele_number", "spanning_reads", "length_range_lower", "length_range_upper",
+        "average_methylation"]].max())
+
 def tdb_consolidate(exist_db, new_db):
     """
     Combine two tdbs. returns new in-memory tdb
@@ -318,5 +327,6 @@ def tdb_consolidate(exist_db, new_db):
     logging.info("Consolidating samples")
     ret['sample'], gt_count = sample_consolidator(exist_db, new_db, allele_lookup)
     logging.info("genotype count:\t%d", gt_count)
-
+    
+    max_dbg(ret)
     return ret
