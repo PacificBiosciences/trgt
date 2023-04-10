@@ -39,6 +39,33 @@ def allele_count(data):
                 .fillna(0)
                 .astype({'allele_number':np.uint16, 'AC':np.uint16}))
 
+@tdb_opener
+def allele_count_length(data):
+    """
+    Allele counts and frequency by allele length
+    """
+    all_alleles = pd.concat([_[["LocusID", "allele_number"]] for _ in data['sample'].values()])
+    lcnts = all_alleles["LocusID"].value_counts()
+    all_alleles = all_alleles.set_index(["LocusID", "allele_number"])
+    all_alleles["allele_length"] = data['allele'].set_index(['LocusID', "allele_number"])['allele_length']
+    acnts = (all_alleles.reset_index()
+                .groupby(["LocusID"])["allele_length"]
+                .value_counts()
+                .rename("AC")
+                .reset_index(level=1))
+    acnts['AF'] = acnts['AC'] / lcnts
+    ret = (data['locus'].set_index("LocusID")
+                .join(acnts)
+                .fillna(0)
+                .astype({'allele_length':np.uint16, 'AC':np.uint16}))
+    # need a way to determine if an allele is the reference allele or not
+    is_ref = (data['allele'].sort_values(["LocusID", "allele_length", "allele_number"])
+              .drop_duplicates(["LocusID", "allele_length"])
+              .set_index(["LocusID", "allele_length"])['allele_number'] == 0)
+    ret = ret.reset_index().set_index(["LocusID", "allele_length"])
+    ret['is_ref'] = is_ref
+    return ret.reset_index(level=1)[["chrom", "start", "end", "is_ref", "allele_length", "AC", "AF"]]
+
 def variant_length(allele_table):
     """
     Calculate variant length as allele's length minus locus' reference allele length
@@ -150,6 +177,7 @@ def methyl(data):
     return pd.concat(parts)
 
 QS = {"allele_cnts": allele_count,
+      "allele_cnts_bylen": allele_count_length,
       "allele_seqs": allele_seqs,
       "monref": monref,
       "gtmerge": gtmerge,
@@ -169,6 +197,8 @@ def query_main(args):
                         help="query to run")
     parser.add_argument("dbname", metavar="TDB", type=str,
                         help="TRGT db name")
+    parser.add_argument("--index", action="store_true",
+                        help="Write index with tsv/csv outputs")
     parser.add_argument("-o", "--output", type=str, default='/dev/stdout',
                         help="Output destination (stdout)")
     parser.add_argument("-O", "--output-type", default='t', choices=['t', 'c', 'p', 'j'],
@@ -182,9 +212,9 @@ def query_main(args):
     result = QS[args.query](args.dbname)
 
     if args.output_type == 't':
-        result.to_csv(args.output, sep='\t', index=False)
+        result.to_csv(args.output, sep='\t', index=args.index)
     elif args.output_type == 'c':
-        result.to_csv(args.output, index=False)
+        result.to_csv(args.output, index=args.index)
     elif args.output_type == 'p':
         result.to_parquet(args.output)
     elif args.output_type == 'j':
