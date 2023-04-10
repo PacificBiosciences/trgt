@@ -6,6 +6,7 @@ import sys
 import argparse
 
 import joblib
+import numpy as np
 import pandas as pd
 import trgt
 
@@ -24,20 +25,19 @@ def tdb_opener(foo, *args, **kwargs):
 @tdb_opener
 def allele_count(data):
     """
-    Allele sample counts
+    Allele counts and frequency
     """
-    ac = data['allele'][["LocusID", "allele_number"]].copy()
-    ac['sample_count'] = 0
-    ac = ac.set_index(["LocusID", "allele_number"])
-    for samp_data in data['sample'].values():
-        num_samps = samp_data.reset_index().groupby(["LocusID", "allele_number"]).size()
-        a, b = ac.align(num_samps, fill_value=0, axis=0)
-        ac["sample_count"] = ac["sample_count"] + b
-
-    ac = ac.reset_index()
-    view = ac.join(data['locus'], on='LocusID', rsuffix="_")
-    view['sample_count'] = view['sample_count'].fillna(0).astype(int)
-    return view[["chrom", "start", "end", "allele_number", "sample_count"]]
+    all_alleles = pd.concat([_[["LocusID", "allele_number"]] for _ in data['sample'].values()])
+    lcnts = all_alleles["LocusID"].value_counts()
+    acnts = (all_alleles.groupby(["LocusID"])["allele_number"]
+                .value_counts()
+                .rename("AC")
+                .reset_index(level=1))
+    acnts['AF'] = acnts['AC'] / lcnts
+    return (data['locus'].set_index("LocusID")
+                .join(acnts)
+                .fillna(0)
+                .astype({'allele_number':np.uint16, 'AC':np.uint16}))
 
 def variant_length(allele_table):
     """
