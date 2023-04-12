@@ -161,9 +161,7 @@ def methyl(data):
         return obs, exp, density, gc_pct
     allele = data['allele'].set_index(["LocusID", "allele_number"])
     new_cols = ["CpG_obs", "CpG_exp", "CpG_density", "GC_pct"]
-    allele[new_cols] = (allele['sequence']#.apply(trgt.dna_decode_df, axis=1)
-                            .apply(cpg_stats, axis=1, result_type='expand'))
-                            #.to_frame()
+    allele["CpG_obs"], allele["CpG_exp"], allele["CpG_density"], allele["GC_pct"] = zip(*allele['sequence'].apply(cpg_stats))
 
     parts = []
     for samp in data['sample']:

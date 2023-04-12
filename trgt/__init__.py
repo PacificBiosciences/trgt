@@ -18,6 +18,8 @@ from trgt.database.dbutils import (
 
 from trgt.database.query import (
     allele_count,
+    allele_count_length,
+    methyl,
     monref,
     gtmerge,
     variant_length,
