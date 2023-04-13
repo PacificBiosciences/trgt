@@ -125,6 +125,20 @@ def gtmerge(data):
     out = loci.join(pd.concat(gt_parts, axis=1, names=snames)).fillna('./.')
     return out.rename(columns=snames).sort_values(["chrom", "start", "end"])
 
+@tdb_opener
+def locus_ji(data):
+    """
+    Calculate loci's sequence composition as mean jaccard index
+    """
+    a_cnts = allele_count(data).reset_index().set_index(["LocusID", "allele_number"])
+    a_cnts['sequence'] = data['allele'].set_index(["LocusID", "allele_number"])['sequence']
+    result = (a_cnts.reset_index()
+               .groupby(['LocusID'])[["sequence", "AC"]]
+               .apply(lambda x:
+                       trgt.alleles_jaccard_dist(x["sequence"].values, x["AC"].values)))
+    result.name = "muJI"
+    return pd.concat([data['locus'].set_index("LocusID"), result], axis=1)
+
 def metadata(dbname):
     """
     Get table properties e.g. row counts and memory/disk sizes (mb)
@@ -181,6 +195,7 @@ QS = {"allele_cnts": allele_count,
       "gtmerge": gtmerge,
       "metadata": metadata,
       "methyl": methyl,
+      "locus_ji": locus_ji,
 }
 
 USAGE = "TRGT queries:\n" + "\n".join([f"    {k:9}: {t.__doc__.strip()}" for k,t in QS.items()])

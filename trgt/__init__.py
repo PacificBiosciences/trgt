@@ -25,7 +25,7 @@ from trgt.database.query import (
     variant_length,
 )
 
-from trgt.database.comp import (
-    old_method,
+from trgt.database.jaccard import (
+    jaccard_compare_seqs,
     alleles_jaccard_dist
 )
