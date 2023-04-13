@@ -23,6 +23,8 @@ from trgt.database.query import (
     monref,
     gtmerge,
     variant_length,
+    composition_polymorphism_score,
+    length_polymorphism_score,
 )
 
 from trgt.database.jaccard import (

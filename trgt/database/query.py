@@ -126,7 +126,7 @@ def gtmerge(data):
     return out.rename(columns=snames).sort_values(["chrom", "start", "end"])
 
 @tdb_opener
-def locus_ji(data, kmer_len=5, min_freq=5):
+def composition_polymorphism_score(data, kmer_len=5, min_freq=5):
     """
     Calculate loci's sequence composition as mean jaccard index
     """
@@ -137,8 +137,18 @@ def locus_ji(data, kmer_len=5, min_freq=5):
                .apply(lambda x:
                        trgt.alleles_jaccard_dist(x["sequence"].values, x["AC"].values,
                                                  kmer_len, min_freq)))
-    result.name = "muJI"
+    result.name = "comp_poly_score"
     return pd.concat([data['locus'].set_index("LocusID"), result], axis=1)
+
+@tdb_opener
+def length_polymorphism_score(data):
+    """
+    Number of distinct allele lengths per 100 samples for each locus
+    """
+    allele = data['allele']
+    len_cnts = allele.groupby(['LocusID'])['allele_length'].nunique() / (len(data['sample']) / 100)
+    len_cnts.name = 'len_poly_score'
+    return pd.concat([data['locus'].set_index('LocusID'), len_cnts], axis=1)
 
 def metadata(dbname):
     """
@@ -196,7 +206,8 @@ QS = {"allele_cnts": allele_count,
       "gtmerge": gtmerge,
       "metadata": metadata,
       "methyl": methyl,
-      "locus_ji": locus_ji,
+      "comp_poly_score": composition_polymorphism_score,
+      "len_poly_score": length_polymorphism_score,
 }
 
 USAGE = "TRGT queries:\n" + "\n".join([f"    {k:9}: {t.__doc__.strip()}" for k,t in QS.items()])

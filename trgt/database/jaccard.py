@@ -1,7 +1,8 @@
 """
-Methods to calculate jaccard distances
+Methods to calculate jaccard indexes
 """
 import sys
+import itertools
 from collections import Counter
 
 def make_kmer_sets(seq, kmer_len=5, min_freq=5):
@@ -14,28 +15,24 @@ def make_kmer_sets(seq, kmer_len=5, min_freq=5):
 
 def jaccard_compare_kmers(kmers1, kmers1_freq, kmers2, kmers2_freq):
     """
-    return the jacard distance of two kmer featurization arrays
+    return the jacard similarity of two kmer sets
     """
-    # Will be True for freq1.union(freq2)
     frequent = kmers1_freq | kmers2_freq
 
-    # Intersection of kmers
-    k1_idx = kmers1 & frequent
-    k2_idx = kmers2 & frequent
+    k1_set = kmers1 & frequent
+    k2_set = kmers2 & frequent
 
-    intersection = len(k1_idx & k2_idx)
-    union = len(k1_idx | k2_idx)
+    intersection = len(k1_set & k2_set)
+    union = len(k1_set | k2_set)
 
     return intersection / union if union else None
 
 def jaccard_compare_seqs(seq1, seq2, kmer_len=5, min_freq=5):
     """
-    return the jaccard distance of two sequences
+    return the jaccard similarity of two sequences
     """
-    kmers1, kmers1_freq = make_kmer_sets(seq1, kmer_len, min_freq)
-    kmers2, kmers2_freq = make_kmer_sets(seq1, kmer_len, min_freq)
-
-    return jaccard_compare_kmers(kmers1, kmers1_freq, kmers2, kmers2_freq)
+    return jaccard_compare_kmers(*make_kmer_sets(seq1, kmer_len, min_freq),
+                                 *make_kmer_sets(seq2, kmer_len, min_freq))
 
 def alleles_jaccard_dist(alleles, counts, kmer_len=5, min_freq=5):
     """
@@ -43,17 +40,15 @@ def alleles_jaccard_dist(alleles, counts, kmer_len=5, min_freq=5):
     return their mean jaccard distance
     """
     allele_cnt = len(alleles)
-    # Only kfeaturize once - only compare high frequency alleles
     all_kfeats = [make_kmer_sets(_, kmer_len, min_freq) for _ in alleles]
     dist_total = 0
     tot_pairs = 0
-    for idx1 in range(allele_cnt - 1):
-        for idx2 in range(idx1 + 1, allele_cnt):
-            dist = jaccard_compare_kmers(*all_kfeats[idx1], *all_kfeats[idx2])
-            if dist is None:
-                continue
-            pair_cnt = counts[idx1] * counts[idx2]
-            dist_total += dist * pair_cnt
-            tot_pairs += pair_cnt
+    for idx1, idx2 in itertools.combinations(range(allele_cnt), 2):
+        dist = jaccard_compare_kmers(*all_kfeats[idx1], *all_kfeats[idx2])
+        if dist is None:
+            continue
+        pair_cnt = counts[idx1] * counts[idx2]
+        dist_total += dist * pair_cnt
+        tot_pairs += pair_cnt
 
     return 1 - dist_total / tot_pairs if tot_pairs else None
