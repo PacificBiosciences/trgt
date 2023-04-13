@@ -57,21 +57,3 @@ def alleles_jaccard_dist(alleles, counts, kmer_len=5, min_freq=5):
             tot_pairs += pair_cnt
 
     return 1 - dist_total / tot_pairs if tot_pairs else None
-
-def test():
-    import trgt
-    import pandas as pd
-    data = trgt.load_tdb("/Users/english/code/trgt/test_files/databases/all_vcf.tdb/",
-                        lfilters=[("LocusID", "<", 100)])
-    a_cnts = trgt.allele_count(data).reset_index().set_index(["LocusID", "allele_number"])
-    allele = data['allele'].set_index(["LocusID", "allele_number"])
-    a_cnts['sequence'] = allele['sequence']
-    result = (a_cnts.reset_index()
-               .groupby(['LocusID'])[["sequence", "AC"]]
-               .apply(lambda x:
-                       alleles_jaccard_dist(x["sequence"].values, x["AC"].values)))
-    result.name = "muJI"
-    print(pd.concat([data['locus'].set_index("LocusID"), result], axis=1))
-
-if __name__ == '__main__':
-    test()

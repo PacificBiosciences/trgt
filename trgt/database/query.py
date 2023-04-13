@@ -126,7 +126,7 @@ def gtmerge(data):
     return out.rename(columns=snames).sort_values(["chrom", "start", "end"])
 
 @tdb_opener
-def locus_ji(data):
+def locus_ji(data, kmer_len=5, min_freq=5):
     """
     Calculate loci's sequence composition as mean jaccard index
     """
@@ -135,7 +135,8 @@ def locus_ji(data):
     result = (a_cnts.reset_index()
                .groupby(['LocusID'])[["sequence", "AC"]]
                .apply(lambda x:
-                       trgt.alleles_jaccard_dist(x["sequence"].values, x["AC"].values)))
+                       trgt.alleles_jaccard_dist(x["sequence"].values, x["AC"].values,
+                                                 kmer_len, min_freq)))
     result.name = "muJI"
     return pd.concat([data['locus'].set_index("LocusID"), result], axis=1)
 
