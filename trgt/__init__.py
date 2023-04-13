@@ -24,3 +24,8 @@ from trgt.database.query import (
     gtmerge,
     variant_length,
 )
+
+from trgt.database.comp import (
+    old_method,
+    alleles_jaccard_dist
+)
