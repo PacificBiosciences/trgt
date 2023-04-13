@@ -1,7 +1,6 @@
 *__pycache__*
-TRGT-HG002.vcf.gz
-tiny.db
-tiny.vcf
+.ipynb_checkpoints
+test_files/
 dist
 build
 *.egg-info
