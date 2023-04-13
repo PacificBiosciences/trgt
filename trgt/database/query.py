@@ -126,13 +126,14 @@ def gtmerge(data):
     return out.rename(columns=snames).sort_values(["chrom", "start", "end"])
 
 @tdb_opener
-def composition_polymorphism_score(data, kmer_len=5, min_freq=5):
+def composition_polymorphism_score(data, min_af=0.01, kmer_len=5, min_freq=5):
     """
     Calculate loci's sequence composition as mean jaccard index
     """
     a_cnts = allele_count(data).reset_index().set_index(["LocusID", "allele_number"])
     a_cnts['sequence'] = data['allele'].set_index(["LocusID", "allele_number"])['sequence']
     result = (a_cnts.reset_index()
+               .where(lambda x: x["AF"] >= min_af)
                .groupby(['LocusID'])[["sequence", "AC"]]
                .apply(lambda x:
                        trgt.alleles_jaccard_dist(x["sequence"].values, x["AC"].values,
@@ -141,12 +142,16 @@ def composition_polymorphism_score(data, kmer_len=5, min_freq=5):
     return pd.concat([data['locus'].set_index("LocusID"), result], axis=1)
 
 @tdb_opener
-def length_polymorphism_score(data):
+def length_polymorphism_score(data, min_af=0.01):
     """
-    Number of distinct allele lengths per 100 samples for each locus
+    Number of distinct alleles by length per 100 samples for each locus
     """
-    allele = data['allele']
-    len_cnts = allele.groupby(['LocusID'])['allele_length'].nunique() / (len(data['sample']) / 100)
+    a_cnts = allele_count(data).reset_index().set_index(["LocusID", "allele_number"])
+    a_cnts['allele_length'] = data['allele'].set_index(["LocusID", "allele_number"])['allele_length']
+    len_cnts = (a_cnts.reset_index()
+                .where(lambda x: x["AF"] >= min_af)
+                .groupby(['LocusID'])['allele_length']
+                .nunique() / (len(data['sample']) / 100))
     len_cnts.name = 'len_poly_score'
     return pd.concat([data['locus'].set_index('LocusID'), len_cnts], axis=1)
 
