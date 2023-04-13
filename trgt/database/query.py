@@ -14,20 +14,24 @@ def tdb_opener(foo, *args, **kwargs):
     """
     Decorator for turning a tdb file name into a loaded tdb
     Allows queries to be used from command line or programmatically
+    Every method decorated with this should have *args, **kwargs added to the parameters
     """
-    def wrapper(data):
+    def wrapper(data, *args, **kwargs):
         if isinstance(data, str):
             data = trgt.load_tdb(data)
-        return foo(data)
+        return foo(data, *args, **kwargs)
     wrapper.__doc__ = foo.__doc__
     return wrapper
 
 @tdb_opener
-def allele_count(data):
+def allele_count(data, samples=None, *args, **kwargs):
     """
     Allele counts and frequency
     """
-    all_alleles = pd.concat([_[["LocusID", "allele_number"]] for _ in data['sample'].values()])
+    samp_data = data["sample"]
+    if samples is None:
+        samples = samp_data.keys()
+    all_alleles = pd.concat([samp_data[_][["LocusID", "allele_number"]] for _ in samples])
     lcnts = all_alleles["LocusID"].value_counts()
     acnts = (all_alleles.groupby(["LocusID"])["allele_number"]
                 .value_counts()
@@ -40,11 +44,14 @@ def allele_count(data):
                 .astype({'allele_number':np.uint16, 'AC':np.uint16}))
 
 @tdb_opener
-def allele_count_length(data):
+def allele_count_length(data, samples=None, *args, **kwargs):
     """
     Allele counts and frequency by allele length
     """
-    all_alleles = pd.concat([_[["LocusID", "allele_number"]] for _ in data['sample'].values()])
+    samp_data = data["sample"]
+    if samples is None:
+        samples = samp_data.keys()
+    all_alleles = pd.concat([samp_data[_][["LocusID", "allele_number"]] for _ in samples])
     lcnts = all_alleles["LocusID"].value_counts()
     all_alleles = all_alleles.set_index(["LocusID", "allele_number"])
     all_alleles["allele_length"] = data['allele'].set_index(['LocusID', "allele_number"])['allele_length']
@@ -64,6 +71,7 @@ def allele_count_length(data):
               .set_index(["LocusID", "allele_length"])['allele_number'] == 0)
     ret = ret.reset_index().set_index(["LocusID", "allele_length"])
     ret['is_ref'] = is_ref
+    ret['is_ref'] = ret['is_ref'].fillna(True).astype(bool)
     return ret.reset_index(level=1)[["chrom", "start", "end", "is_ref", "allele_length", "AC", "AF"]]
 
 def variant_length(allele_table):
@@ -85,7 +93,7 @@ def allele_seqs(dbname):
     return alleles.reset_index()[["LocusID", "allele_number", "ref_diff", "sequence"]].dropna()
 
 @tdb_opener
-def monref(data):
+def monref(data, *args, **kwargs):
     """
     Monozygotic reference sites per-sample and overall
     """
@@ -109,7 +117,7 @@ def monref(data):
     return out_table
 
 @tdb_opener
-def gtmerge(data):
+def gtmerge(data, *args, **kwargs):
     """
     Collect per-locus genotypes
     """
@@ -126,7 +134,7 @@ def gtmerge(data):
     return out.rename(columns=snames).sort_values(["chrom", "start", "end"])
 
 @tdb_opener
-def composition_polymorphism_score(data, min_af=0.01, kmer_len=5, min_freq=5):
+def composition_polymorphism_score(data, min_af=0.01, kmer_len=5, min_freq=5, *args, **kwargs):
     """
     Calculate loci's sequence composition as mean jaccard index
     """
@@ -142,7 +150,7 @@ def composition_polymorphism_score(data, min_af=0.01, kmer_len=5, min_freq=5):
     return pd.concat([data['locus'].set_index("LocusID"), result], axis=1)
 
 @tdb_opener
-def length_polymorphism_score(data, min_af=0.01):
+def length_polymorphism_score(data, min_af=0.01, *args, **kwargs):
     """
     Number of distinct alleles by length per 100 samples for each locus
     """
@@ -176,7 +184,7 @@ def metadata(dbname):
     return pd.DataFrame(rows, columns=header)
 
 @tdb_opener
-def methyl(data):
+def methyl(data, *args, **kwargs):
     """
     Allele length, methylation, and CpG stats (PMID:3656447)
     """

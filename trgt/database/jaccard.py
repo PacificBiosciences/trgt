@@ -7,7 +7,7 @@ from collections import Counter
 
 def make_kmer_sets(seq, kmer_len=5, min_freq=5):
     """
-    Makes the sets of all kmers and set of kmers over min_freq
+    Make the sets of all kmers and those over min_freq
     """
     kmers = Counter([seq[i:i + kmer_len] for i in range(len(seq) - kmer_len + 1)])
     kmers_freq = {k for k, c in kmers.items() if c >= min_freq}
@@ -15,7 +15,7 @@ def make_kmer_sets(seq, kmer_len=5, min_freq=5):
 
 def jaccard_compare_kmers(kmers1, kmers1_freq, kmers2, kmers2_freq):
     """
-    return the jacard similarity of two kmer sets
+    Return the jacard similarity of two kmer sets
     """
     frequent = kmers1_freq | kmers2_freq
 
@@ -29,7 +29,7 @@ def jaccard_compare_kmers(kmers1, kmers1_freq, kmers2, kmers2_freq):
 
 def jaccard_compare_seqs(seq1, seq2, kmer_len=5, min_freq=5):
     """
-    return the jaccard similarity of two sequences
+    Return the jaccard similarity of two sequences
     """
     return jaccard_compare_kmers(*make_kmer_sets(seq1, kmer_len, min_freq),
                                  *make_kmer_sets(seq2, kmer_len, min_freq))
@@ -39,11 +39,10 @@ def alleles_jaccard_dist(alleles, counts, kmer_len=5, min_freq=5):
     Given a list of alleles and their observed counts,
     return their mean jaccard distance
     """
-    allele_cnt = len(alleles)
     all_kfeats = [make_kmer_sets(_, kmer_len, min_freq) for _ in alleles]
     dist_total = 0
     tot_pairs = 0
-    for idx1, idx2 in itertools.combinations(range(allele_cnt), 2):
+    for idx1, idx2 in itertools.combinations(range(len(all_kfeats)), 2):
         dist = jaccard_compare_kmers(*all_kfeats[idx1], *all_kfeats[idx2])
         if dist is None:
             continue
