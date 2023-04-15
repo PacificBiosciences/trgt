@@ -1,6 +1,7 @@
 TRGTdb tutorial
 ===============
-TRGT output vcfs can be collected into a database for easier querying.
+TRGT output vcfs can be collected into a database for easier querying. For an interactive tutorial, see
+`notebooks/Introduction.ipynb`
 
 The database is a directory with a `.tdb` extension containing a set of parquet files. For example:
 ```
@@ -29,16 +30,17 @@ allele.pq: Tandem repeat alleles found on a locus
 | LocusID       | locus to which the allele belongs    |
 | allele_number | identifier of the allele on the locus. '0' is the reference allele |
 | allele_length | length of the allele                 |
-| sequence      | 2bit encoded sequence of the allele  |
+| sequence      | sequence of the allele               |
 
 sample.\*.pq: sample properties of alleles
-| column             | definition                           |
-|--------------------|--------------------------------------|
-| LocusID            | identifier for the locus             |
-| allele_number      | identifier of the allele on the locus. '0' is the reference allele |
-| spanning_reads     | number of spanning reads supporting per allele |
-| length_range_lower | allele minimum predicted length      |
-| length_range_upper | allele maximum predicted length      |
+| column              | definition                           |
+|---------------------|--------------------------------------|
+| LocusID             | identifier for the locus             |
+| allele_number       | identifier of the allele on the locus. '0' is the reference allele |
+| spanning_reads      | number of spanning reads supporting per allele |
+| length_range_lower  | allele minimum predicted length      |
+| length_range_upper  | allele maximum predicted length      |
+| average_methylation | allele's mean methylation            |
 
 
 Creating a database
@@ -160,8 +162,3 @@ chr1 = trgt.load_tdb("family.tdb",
 		afilters=[("allele_length", ">=", 1000)])
 ```
 See `help(trgt.load_tdb)` for details on the filters.
-
-To decode allele sequences to a string
-```python
-sequences = data['allele'].apply(trgt.dna_decode_df, axis=1)
-```
