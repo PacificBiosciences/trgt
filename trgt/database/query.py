@@ -97,23 +97,27 @@ def monref(data, *args, **kwargs):
     """
     Monozygotic reference sites per-sample and overall
     """
+    any_loci_alt = pd.Series(np.zeros(len(data['locus'])),
+                             dtype=bool,
+                             index=data['locus']["LocusID"])
+
     out_table = []
     for samp,table in data["sample"].items():
         table["is_ref"] = table["allele_number"] == 0
+        samp_is_ref = table.groupby(["LocusID"])['is_ref'].all()
+        any_loci_alt.loc[samp_is_ref[~samp_is_ref].index] = True
         out_table.append([samp,
                           table["LocusID"].nunique(),
-                          table.groupby(["LocusID"])["is_ref"].all().sum()
+                          samp_is_ref.sum()
                          ])
 
-    all_sap = pd.concat(data["sample"].values())
-    all_sap["is_ref"] = all_sap["allele_number"] == 0
     out_table.append(['all',
-                      len(data['locus']),
-                      all_sap.groupby(["LocusID"])["is_ref"].all().sum()
+                      len(any_loci_alt),
+                      (~any_loci_alt).sum()
                      ])
-
     out_table = pd.DataFrame(out_table, columns=["sample", "loci", "mon_ref"])
     out_table['pct'] = out_table['mon_ref'] / out_table['loci']
+
     return out_table
 
 @tdb_opener
