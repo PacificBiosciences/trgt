@@ -8,7 +8,8 @@ import trgt.database as tdb
 CMDS = {
     "create": ("Create a TRGTdb", tdb.create_main),
     "query": ("Query a TRGTdb", tdb.query_main),
-    "append": ("Append a VCF/TRGTDB to an existing TRGTdb", tdb.append_main)
+    "append": ("Append a VCF/TRGTDB to an existing TRGTdb", tdb.append_main),
+    "deid": ("Deidentify a TRGTdb", tdb.deid_main),
 }
 
 USAGE = "commands:\n" + "\n".join([f"    {k:9} {t[0]}" for k,t in CMDS.items()])

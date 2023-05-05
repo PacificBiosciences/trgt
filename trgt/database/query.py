@@ -86,7 +86,7 @@ def allele_seqs(dbname):
     """
     Allele sequence, length, and difference from reference
     """
-    tdb_fns = trgt.get_tdb_files(dbname)
+    tdb_fns = trgt.get_tdb_filenames(dbname)
     alleles = pd.read_parquet(tdb_fns["allele"])
     #alleles["sequence"] = alleles.apply(trgt.dna_decode_df, axis=1)
     alleles["ref_diff"] = variant_length(alleles)
@@ -178,7 +178,7 @@ def metadata(dbname):
         shape = df.shape[0]
         return [table, dsize, msize, shape]
 
-    fnames = trgt.get_tdb_files(dbname)
+    fnames = trgt.get_tdb_filenames(dbname)
     data = trgt.load_tdb(dbname)
     header = ['table', 'disk', 'mem', 'rows']
     rows = [sizes("locus", fnames['locus'], data['locus']),

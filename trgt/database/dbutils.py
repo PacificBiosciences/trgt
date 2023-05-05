@@ -26,7 +26,7 @@ def get_tdb_samplenames(file):
     return ret
 
 
-def get_tdb_files(dbname):
+def get_tdb_filenames(dbname):
     """
     Return names of parquet table files in a tdb
     """
@@ -68,7 +68,7 @@ def load_tdb(dbname, samples=None, lfilters=None, afilters=None, sfilters=None):
             return n_filt + filts
         filts.insert(0, n_filt)
         return filts
-    names = get_tdb_files(dbname)
+    names = get_tdb_filenames(dbname)
     ret = {}
     ret['locus'] = pq.read_table(names['locus'], filters=lfilters).to_pandas()
     if lfilters:
@@ -116,7 +116,7 @@ def dump_tdb(data, output):
     """
     if not os.path.exists(output):
         os.mkdir(output)
-    pq_fns = get_tdb_files(output)
+    pq_fns = get_tdb_filenames(output)
     set_tdb_types(data)
     data['locus'].to_parquet(pq_fns['locus'], index=False, compression='gzip')
     data['allele'].to_parquet(pq_fns['allele'], index=False, compression='gzip')
