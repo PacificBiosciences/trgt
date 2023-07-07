@@ -100,7 +100,7 @@ def set_tdb_types(d):
                "spanning_reads": np.uint16,
                "length_range_lower": np.uint16,
                "length_range_upper": np.uint16,
-               "average_methylation": np.uint16}
+               "average_methylation": np.float16}
 
     d['locus'] = d['locus'].astype(l_types)
     d['allele'] = d['allele'].astype(a_types)
