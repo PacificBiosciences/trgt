@@ -100,7 +100,7 @@ def set_tdb_types(d):
                "spanning_reads": np.uint16,
                "length_range_lower": np.uint16,
                "length_range_upper": np.uint16,
-               "average_methylation": np.float16}
+               "average_methylation": np.float32}
 
     d['locus'] = d['locus'].astype(l_types)
     d['allele'] = d['allele'].astype(a_types)
@@ -126,7 +126,7 @@ def dump_tdb(data, output):
                           ('spanning_reads', pa.uint16()),
                           ('length_range_lower', pa.uint16()),
                           ('length_range_upper', pa.uint16()),
-                          ('average_methylation', pa.uint16())
+                          ('average_methylation', pa.float32())
                         ])
     for sample, value in data['sample'].items():
         o_fn = os.path.join(output, f"sample.{sample}.pq")
