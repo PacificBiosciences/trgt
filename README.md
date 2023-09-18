@@ -70,5 +70,5 @@ extent or within any time frame.
 - 0.5.0
   - The genotyper now uses information about SNPs adjacent to repeats
   - BAM files now contain read-to-allele assignments
-  - Added support for gzip comressed repeat files
+  - Added support for gzip compressed repeat files
   - Improved error handling and error messages
