@@ -14,12 +14,25 @@ the program.
 ## Availability
 
 - TRGT and TRVZ Linux binaries are [available here](https://github.com/PacificBiosciences/trgt/releases)
-- Repeat definition files are [available here](repeats/)
+- Repeat definition files are available in [this Zenovo repository](https://zenodo.org/record/7987365)
+  and definitions of known pathogenic repeats are [also available here](repeats/).
+
+## TRGTdb
+
+TRGT outputs VCFs containing TR alleles from each region in the repeat catalog.
+To facilitate analysis of alleles across multiple samples, we provide the TRGTdb
+which can be found [here](https://github.com/PacificBiosciences/trgt/pull/6).
+After cloning that fork, the TRGTdb can be installed by running
+`python3 -m pip install trgt/`. See the fork's `notebooks/` directory for tutorials
+converting results into TRGTdb as well as example analyses. TRGTdb was developed by
+[Adam English](https://github.com/ACEnglish).
 
 ## Documentation
 
 - Tutorials
-  - [Introductory tutorial](docs/tutorial.md)
+  - Introductory tutorial: [non-interactive](docs/tutorial.md) and
+    [interactive](https://mybinder.org/v2/gh/tandem-repeat-workflows/trgt-tutorial/HEAD?labpath=tutorial.ipynb)
+    versions
   - [Interpreting TRVZ plots](docs/trvz-plots.md)
 - Reference
   - [Command-line interface](docs/cli.md)
@@ -54,3 +67,8 @@ extent or within any time frame.
   - Added sample karyotype parameter (`XX` or `XY`)
   - Renamed VCF genotype field `ALCI` to `ALLR`
   - Made genotyping algorithm changes to improve accuracy
+- 0.5.0
+  - The genotyper now uses information about SNPs adjacent to repeats
+  - BAM files now contain read-to-allele assignments
+  - Added support for gzip comressed repeat files
+  - Improved error handling and error messages
