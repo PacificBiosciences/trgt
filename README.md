@@ -14,7 +14,7 @@ the program.
 ## Availability
 
 - TRGT and TRVZ Linux binaries are [available here](https://github.com/PacificBiosciences/trgt/releases)
-- Repeat definition files are available in [this Zenovo repository](https://zenodo.org/record/7987365)
+- Repeat definition files are available in [this Zenodo repository](https://zenodo.org/record/8329210)
   and definitions of known pathogenic repeats are [also available here](repeats/).
 
 ## TRGTdb
