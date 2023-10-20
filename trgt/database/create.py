@@ -46,6 +46,7 @@ def check_args(args):
             for s in get_samples(i):
                 if s in seen_samples:
                     logging.error(f"input {i} has redundant sample with {seen_samples[i]}")
+                    check_fail = True
                 seen_samples[s] = i
             pysam.set_verbosity(old) # turn back on
     return check_fail
