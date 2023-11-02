@@ -60,7 +60,7 @@ bases 0 to 72 on the second allele. The CCG repeat spans bases 57 to 84 on the
 first allele and bases 78 to 105 on the second allele (see panels A & C of the
 figure below).
 
-![Important fields](figures/VCF-overview.png)
+<img width="600px" src="figures/VCF-overview.png"/>
 
 ## AP field
 

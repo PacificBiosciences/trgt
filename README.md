@@ -58,6 +58,15 @@ for assistance with any TRGT release. Please report all issues through GitHub
 instead. We make no warranty that any such issue will be addressed, to any
 extent or within any time frame.
 
+## Citation
+If you use TRGT, please cite our pre-print:
+
+[Dolzhenko E, English A, Dashnow H, De Sena Brandine G, Mokveld T, Rowell WJ,
+Karniski C, Kronenberg Z, Danzi MC, Cheung W, Bi C, Farrow E, Wenger A,
+Martínez-Cerdeño V, Bartley TD, Jin P, Nelson D, Zuchner S, Pastinen T,
+Quinlan AR, Sedlazeck FJ, Eberle MA. Resolving the unsolved: Comprehensive
+assessment of tandem repeats at scale. bioRxiv. 2023](https://doi.org/10.1101/2023.05.12.540470)
+
 ## Full Changelog
 
 - 0.3.4
@@ -72,3 +81,15 @@ extent or within any time frame.
   - BAM files now contain read-to-allele assignments
   - Added support for gzip compressed repeat files
   - Improved error handling and error messages
+
+### DISCLAIMER
+THIS WEBSITE AND CONTENT AND ALL SITE-RELATED SERVICES, INCLUDING ANY DATA, ARE 
+PROVIDED "AS IS," WITH ALL FAULTS, WITH NO REPRESENTATIONS OR WARRANTIES OF ANY 
+KIND, EITHER EXPRESS OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, ANY WARRANTIES 
+OF MERCHANTABILITY, SATISFACTORY QUALITY, NON-INFRINGEMENT OR FITNESS FOR A 
+PARTICULAR PURPOSE. YOU ASSUME TOTAL RESPONSIBILITY AND RISK FOR YOUR USE OF THIS
+SITE, ALL SITE-RELATED SERVICES, AND ANY THIRD PARTY WEBSITES OR APPLICATIONS. NO
+ORAL OR WRITTEN INFORMATION OR ADVICE SHALL CREATE A WARRANTY OF ANY KIND. ANY 
+REFERENCES TO SPECIFIC PRODUCTS OR SERVICES ON THE WEBSITES DO NOT CONSTITUTE OR 
+IMPLY A RECOMMENDATION OR ENDORSEMENT BY PACIFIC BIOSCIENCES.
+
