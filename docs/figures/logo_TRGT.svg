@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_1" data-name="Layer 1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 64 64">
+  <defs>
+    <style>
+      .cls-1, .cls-2 {
+        stroke-width: 0px;
+      }
+
+      .cls-1, .cls-3, .cls-4 {
+        fill: none;
+      }
+
+      .cls-2 {
+        fill: url(#radial-gradient);
+      }
+
+      .cls-3, .cls-5, .cls-4 {
+        stroke: #fff;
+        stroke-width: 2px;
+      }
+
+      .cls-5 {
+        fill: url(#linear-gradient);
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .cls-4 {
+        opacity: .2;
+      }
+    </style>
+    <radialGradient id="radial-gradient" cx="32" cy="32" fx="32" fy="32" r="22" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#00b8c4"/>
+      <stop offset="1" stop-color="#1383c6"/>
+    </radialGradient>
+    <linearGradient id="linear-gradient" x1="19.0016" y1="32" x2="49.0016" y2="32" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#00b8c4"/>
+      <stop offset="1" stop-color="#1383c6"/>
+    </linearGradient>
+  </defs>
+  <rect class="cls-1" width="64" height="64"/>
+  <g>
+    <circle class="cls-2" cx="32" cy="32" r="22"/>
+    <g>
+      <polygon class="cls-5" points="40.82527 47 19.0016 47 27.17793 32 19.0016 17 40.82527 17 49.0016 32 40.82527 47"/>
+      <polyline class="cls-3" points="33.55072 47 41.72704 32 33.55072 17"/>
+      <polyline class="cls-3" points="26.27616 47 34.45248 32 26.27616 17"/>
+      <polyline class="cls-4" points="21.51284 46.66667 29.50726 32.00006 22.44604 19.04551 41.61228 19.04551"/>
+    </g>
+  </g>
+</svg>

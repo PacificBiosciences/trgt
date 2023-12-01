@@ -1,4 +1,8 @@
-# TRGT: Tandem Repeat Genotyper
+<h1 align="center"><img width="300px" src="docs/figures/logo_TRGT.svg"/></h1>
+
+<h1 align="center">TRGT</h1>
+
+<h3 align="center">Tandem repeat genotyping tool for HiFi sequencing data</h3>
 
 TRGT is a tool for targeted genotyping of tandem repeats from PacBio HiFi data.
 In addition to the basic size genotyping, TRGT profiles sequence composition,
