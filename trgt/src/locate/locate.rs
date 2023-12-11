@@ -3,25 +3,6 @@ use bio::alignment::{pairwise::*, AlignmentOperation};
 use itertools::Itertools;
 use std::str;
 
-/*
-#[derive(Debug)]
-pub struct SearchParams {
-    pub search_flank_len: usize,
-    pub output_flank_len: usize,
-    pub kmer_len: usize,
-    pub step_len: usize,
-    pub max_delta: i32,
-    pub min_kmer_count: usize,
-}
-*/
-
-pub struct Locator {
-    //params: SearchParams,
-    lf: String,
-    rf: String,
-    flank_len: usize,
-}
-
 #[derive(Debug, Clone, Copy)]
 pub struct TrgtScoring {
     pub match_scr: i32,
@@ -34,102 +15,91 @@ pub struct TrgtScoring {
 
 type Span = (usize, usize);
 
-impl Locator {
-    pub fn new(lf: &str, rf: &str, flank_len: usize) -> Locator {
-        assert!(lf.len() == rf.len());
-        Locator {
-            lf: lf.to_string(),
-            rf: rf.to_string(),
-            flank_len,
-        }
-    }
-
-    fn find_spans<F>(
-        aligner: &mut banded::Aligner<F>,
-        piece: &str,
-        seqs: &[&str],
-        params: &Params,
-    ) -> Vec<Option<(usize, usize)>>
-    where
-        F: Fn(u8, u8) -> i32,
-    {
-        seqs.iter()
-            .map(|s| {
-                if let Some(start) = s.find(piece) {
-                    Some((start, start + piece.len()))
+fn find_spans<F>(
+    aligner: &mut banded::Aligner<F>,
+    piece: &str,
+    seqs: &[&str],
+    params: &Params,
+) -> Vec<Option<(usize, usize)>>
+where
+    F: Fn(u8, u8) -> i32,
+{
+    seqs.iter()
+        .map(|s| {
+            if let Some(start) = s.find(piece) {
+                Some((start, start + piece.len()))
+            } else {
+                let align = aligner.semiglobal(piece.as_bytes(), s.as_bytes());
+                let flank_aln_len = align
+                    .operations
+                    .iter()
+                    .filter(|x| **x == AlignmentOperation::Match)
+                    .count();
+                if flank_aln_len as f32
+                    >= (params.search_flank_len as f32) * params.min_flank_id_frac
+                {
+                    Some((align.ystart, align.yend))
                 } else {
-                    let align = aligner.semiglobal(piece.as_bytes(), s.as_bytes());
-                    let flank_aln_len = align
-                        .operations
-                        .iter()
-                        .filter(|x| **x == AlignmentOperation::Match)
-                        .count();
-                    if flank_aln_len as f32
-                        >= (params.search_flank_len as f32) * params.min_flank_id_frac
-                    {
-                        Some((align.ystart, align.yend))
-                    } else {
-                        None
-                    }
+                    None
                 }
-            })
-            .collect()
-    }
+            }
+        })
+        .collect()
+}
 
-    pub fn locate(&mut self, reads: &[HiFiRead], params: &Params) -> Vec<Option<Span>> {
-        let lf_piece = &self.lf[self.lf.len() - self.flank_len..];
-        let rf_piece = &self.rf[..self.flank_len];
+pub fn find_tr_spans(lf: &str, rf: &str, reads: &[HiFiRead], params: &Params) -> Vec<Option<Span>> {
+    let lf_piece = &lf[lf.len() - params.search_flank_len..];
+    let rf_piece = &rf[..params.search_flank_len];
 
-        let scoring = Scoring {
-            match_fn: |a: u8, b: u8| {
-                if a == b {
-                    params.aln_scoring.match_scr
+    let scoring = Scoring {
+        match_fn: |a: u8, b: u8| {
+            if a == b {
+                params.aln_scoring.match_scr
+            } else {
+                -params.aln_scoring.mism_scr
+            }
+        },
+        match_scores: Some((params.aln_scoring.match_scr, -params.aln_scoring.mism_scr)),
+        gap_open: -params.aln_scoring.gapo_scr,
+        gap_extend: -params.aln_scoring.gape_scr,
+        xclip_prefix: MIN_SCORE,
+        xclip_suffix: MIN_SCORE,
+        yclip_prefix: 0,
+        yclip_suffix: 0,
+    };
+
+    let mut aligner = banded::Aligner::with_capacity_and_scoring(
+        params.search_flank_len + 10, // global length
+        20000,                        // local length: maximum HiFi read length
+        scoring,
+        params.aln_scoring.kmer_len,
+        params.aln_scoring.bandwidth,
+    );
+
+    let seqs = reads
+        .iter()
+        .map(|r| std::str::from_utf8(&r.bases).unwrap())
+        .collect_vec();
+
+    let lf_spans = find_spans(&mut aligner, lf_piece, &seqs, params);
+    let rf_spans = find_spans(&mut aligner, rf_piece, &seqs, params);
+
+    lf_spans
+        .iter()
+        .zip(rf_spans.iter())
+        .map(|(lf_span, rf_span)| match (lf_span, rf_span) {
+            (None, None) => None,      // No left or right span
+            (Some(_lf), None) => None, // Left flanking
+            (None, Some(_rf)) => None, // Right flanking
+            (Some(lf), Some(rf)) => {
+                if lf.1 <= rf.0 {
+                    Some((lf.1, rf.0))
                 } else {
-                    -params.aln_scoring.mism_scr
+                    None // Discordant flanks
                 }
-            },
-            match_scores: Some((params.aln_scoring.match_scr, -params.aln_scoring.mism_scr)),
-            gap_open: -params.aln_scoring.gapo_scr,
-            gap_extend: -params.aln_scoring.gape_scr,
-            xclip_prefix: MIN_SCORE,
-            xclip_suffix: MIN_SCORE,
-            yclip_prefix: 0,
-            yclip_suffix: 0,
-        };
-
-        let mut aligner = banded::Aligner::with_capacity_and_scoring(
-            self.flank_len + 10, // global length
-            20000,               // local length: maximum HiFi read length
-            scoring,
-            params.aln_scoring.kmer_len,
-            params.aln_scoring.bandwidth,
-        );
-
-        let seqs = reads
-            .iter()
-            .map(|r| std::str::from_utf8(&r.bases).unwrap())
-            .collect_vec();
-
-        let lf_spans = Self::find_spans(&mut aligner, lf_piece, &seqs, params);
-        let rf_spans = Self::find_spans(&mut aligner, rf_piece, &seqs, params);
-
-        lf_spans
-            .iter()
-            .zip(rf_spans.iter())
-            .map(|(lf_span, rf_span)| match (lf_span, rf_span) {
-                (None, None) => None,      // No left or right span
-                (Some(_lf), None) => None, // Left flanking
-                (None, Some(_rf)) => None, // Right flanking
-                (Some(lf), Some(rf)) => {
-                    if lf.1 <= rf.0 {
-                        Some((lf.1, rf.0))
-                    } else {
-                        None // Discordant flanks
-                    }
-                }
-            })
-            .collect()
-    }
+            }
+        })
+        .collect()
 }
 
 /*

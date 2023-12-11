@@ -2,152 +2,135 @@ use crate::cluster::consensus;
 use crate::cluster::math::median;
 use crate::genotype::{Gt, TrSize};
 use arrayvec::ArrayVec;
-use bio::alignment::distance::levenshtein;
+use bio::alignment::distance::simd::bounded_levenshtein;
 use bio::alignment::{pairwise::*, Alignment};
 use itertools::Itertools;
 use kodama::{linkage, Method};
 
+pub fn central_read(num_seqs: usize, group: &[usize], dists: &[f64]) -> usize {
+    let group_size = group.len();
+    if group_size <= 2 {
+        return group[0];
+    }
+
+    let mut dist_sums = vec![0_f64; group_size];
+    for i in 0..(group_size - 1) {
+        for j in (i + 1)..group_size {
+            let index1 = group[i];
+            let index2 = group[j];
+
+            /* dist_sums has the condensed distance matrix, element 0 is
+             * dist(seq[0], seq[1]), element 1 is dist(seq[0], seq[2]), etc.
+             * This is the "inverse" that finds the matrix index based on the
+             * index of the two seqs being compared */
+            let mat_index = num_seqs * index1 - index1 * (index1 + 3) / 2 + index2 - 1;
+            dist_sums[i] += dists[mat_index];
+            dist_sums[j] += dists[mat_index];
+        }
+    }
+
+    dist_sums
+        .iter()
+        .enumerate()
+        .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+        .map(|(index, _)| group[index])
+        .unwrap()
+}
+
+pub fn make_consensus(
+    num_seqs: usize,
+    trs: &[&str],
+    dists: &[f64],
+    group: &[usize],
+) -> (String, TrSize) {
+    let seqs = group.iter().map(|&i| trs[i]).collect_vec();
+    let backbone = trs[central_read(num_seqs, group, dists)];
+    let aligns = align(backbone, &seqs);
+    let allele = consensus::repair_consensus(backbone, &seqs, &aligns);
+    let size = TrSize::new(allele.len(), get_ci(&seqs));
+
+    (allele, size)
+}
+
 pub fn genotype(seqs: &Vec<&[u8]>, trs: &[&str]) -> (Gt, Vec<String>, Vec<i32>) {
-    const MAX_SEQS: usize = 50; // max number of sequences to do all-pairs Levenshtein
-    let mut groups = cluster(seqs, MAX_SEQS);
+    let mut dists = get_dist_matrix(seqs);
+    let mut groups = cluster(seqs.len(), &mut dists);
     groups.sort_by_key(|a| a.len());
 
     let group1 = groups.pop().unwrap();
-    let seqs1 = group1.iter().map(|i| trs[*i]).collect_vec();
-    let backbone = *seqs1.first().unwrap();
-    let aligns1 = align(backbone, &seqs1);
-    let allele1 = consensus::repair_consensus(backbone, &seqs1, &aligns1);
+    let (allele1, size1) = make_consensus(seqs.len(), trs, &dists, &group1);
 
-    let size1 = TrSize {
-        size: allele1.len(),
-        ci: get_ci(&seqs1),
+    let group2 = groups.pop().unwrap_or_default();
+
+    const MAX_GROUP_RATIO: usize = 10;
+    let is_homozygous = group2.is_empty() || group2.len() * MAX_GROUP_RATIO <= group1.len() || {
+        // reject group2 if estimated consensus size difference is negligible
+        // and group 1 has significantly more reads.
+        let group1_len =
+            median(&group1.iter().map(|&i| trs[i].len() as i32).collect_vec()).unwrap();
+        let group2_len =
+            median(&group2.iter().map(|&i| trs[i].len() as i32).collect_vec()).unwrap();
+        let delta = (group1_len - group2_len).abs();
+        let group1_frac = group1.len() as f64 / (group1.len() as f64 + group2.len() as f64);
+
+        const MIN_GROUP_SIZE_DIFF: f32 = 100.0;
+        const MAX_SIMILAR_GROUP_FRAC: f64 = 0.80;
+        delta <= MIN_GROUP_SIZE_DIFF && group1_frac >= MAX_SIMILAR_GROUP_FRAC
     };
 
-    if groups.is_empty() {
+    if is_homozygous {
         let gt = ArrayVec::from([size1.clone(), size1]);
         let alleles = vec![allele1.clone(), allele1];
-        let classification = vec![0_i32; seqs.len()];
+
+        // distribute reads across alleles "randomly"
+        let classification = (0..seqs.len() as i32).map(|x| x % 2).collect::<Vec<i32>>();
         return (gt, alleles, classification);
     }
 
-    let group2 = groups.pop().unwrap();
-
-    let tiny_group2 = group1.len() >= 10 && group2.len() == 1;
-    let group1_len = median(&group1.iter().map(|i| trs[*i].len() as i32).collect_vec()).unwrap();
-    let group2_len = median(&group2.iter().map(|i| trs[*i].len() as i32).collect_vec()).unwrap();
-    let delta = (group1_len - group2_len).abs();
-    let group1_frac = group1.len() as f64 / (group1.len() as f64 + group2.len() as f64);
-    let small_group2 = delta <= 100.0 && group1_frac >= 0.80;
-
-    if tiny_group2 || small_group2 {
-        let gt = ArrayVec::from([size1.clone(), size1]);
-        let alleles = vec![allele1.clone(), allele1];
-        let classification = vec![0_i32; seqs.len()];
-        return (gt, alleles, classification);
-    }
-
-    let seqs2 = group2.iter().map(|i| trs[*i]).collect_vec();
-    let backbone = *seqs2.first().unwrap();
-    let aligns2 = align(backbone, &seqs2);
-    let allele2 = consensus::repair_consensus(backbone, &seqs2, &aligns2);
-
-    let mut classifications = vec![2_i32; seqs.len()];
-
-    // for reads already clustered, no need to do edit distance
+    let (allele2, size2) = make_consensus(seqs.len(), trs, &dists, &group2);
+    let mut classifications = vec![2; seqs.len()];
     for seq_index in group1 {
-        classifications[seq_index] = 0_i32;
+        classifications[seq_index] = 0;
     }
     for seq_index in group2 {
-        classifications[seq_index] = 1_i32;
+        classifications[seq_index] = 1;
     }
 
-    // assign reads that weren't used for clustering to the closest allele
-    if seqs.len() > MAX_SEQS {
-        let mut tie_breaker = 1;
-        let a1 = &allele1.as_bytes();
-        let a2 = &allele2.as_bytes();
-        for (tr, classification) in trs.iter().zip(classifications.iter_mut()) {
-            if *classification == 2 {
-                //no allele assigned
-                let tr = &tr.as_bytes();
-                let dist1 = levenshtein(tr, a1);
-                let dist2 = levenshtein(tr, a2);
-                *classification = match dist1.cmp(&dist2) {
-                    std::cmp::Ordering::Less => 0,
-                    std::cmp::Ordering::Greater => 1,
-                    std::cmp::Ordering::Equal => {
-                        tie_breaker = (tie_breaker + 1) % 2;
-                        tie_breaker
-                    }
-                };
-            }
-        }
-    }
-    let size2 = TrSize {
-        size: allele2.len(),
-        ci: get_ci(&seqs2),
+    let (gt, alleles) = if allele1.len() > allele2.len() {
+        classifications = classifications.iter().map(|x| 1 - x).collect();
+        (ArrayVec::from([size2, size1]), vec![allele2, allele1])
+    } else {
+        (ArrayVec::from([size1, size2]), vec![allele1, allele2])
     };
-    let mut gt = Gt::new();
-    gt.push(size1);
-    gt.push(size2);
-    (gt, vec![allele1, allele2], classifications)
+    (gt, alleles, classifications)
 }
 
-pub fn cluster(seqs: &Vec<&[u8]>, max_seqs: usize) -> Vec<Vec<usize>> {
-    if seqs.is_empty() {
+pub fn cluster(num_seqs: usize, dists: &mut Vec<f64>) -> Vec<Vec<usize>> {
+    if num_seqs == 0 {
         return Vec::new();
     }
 
-    if seqs.len() == 1 {
+    assert_eq!(num_seqs * (num_seqs - 1) / 2, dists.len());
+    if num_seqs == 1 {
         return vec![vec![0]];
     }
 
-    if seqs.len() == 2 {
+    if num_seqs == 2 {
         return vec![vec![0], vec![1]];
     }
 
-    let (seqs, orig_index) = if seqs.len() <= max_seqs {
-        (seqs.clone(), (0..seqs.len()).collect::<Vec<usize>>())
-    } else {
-        // uniformly pick sequences by length distribution
-        let num_reads = seqs.len();
-        log::warn!(
-            "Subsampling {} / {} reads for sequence-based clustering",
-            max_seqs,
-            num_reads
-        );
-        let mut ret: Vec<&[u8]> = Vec::new();
-        let mut orig_index = vec![0; max_seqs];
-        ret.reserve(max_seqs);
-        let mut fast: f64 = 0.0;
-        let step = (num_reads as f64) / (max_seqs as f64);
+    let dendrogram = linkage(dists, num_seqs, Method::Ward);
 
-        for item in orig_index.iter_mut().take(max_seqs) {
-            let ind = fast.floor() as usize;
-            ret.push(seqs[ind]);
-            *item = ind;
-            fast += step;
-        }
-
-        (ret, orig_index)
-    };
-
-    let mut dists = get_dist_matrix(&seqs);
-    let dendrogram = linkage(&mut dists, seqs.len(), Method::Ward);
-    let cutoff = dendrogram
-        .steps()
-        .iter()
-        .map(|s| s.dissimilarity)
-        .max_by(|a, b| a.partial_cmp(b).unwrap())
-        .unwrap()
-        * 0.7;
+    // last element is the last merge, which is the highest dissimilarity
+    let cutoff = dendrogram.steps().last().unwrap().dissimilarity;
+    let cutoff = cutoff * 0.7;
 
     let mut num_groups = 0;
-    let num_nodes = 2 * seqs.len() - 1;
+    let num_nodes = 2 * num_seqs - 1;
     let mut membership = vec![None; num_nodes];
 
     for (cluster_index, step) in dendrogram.steps().iter().enumerate().rev() {
-        let cluster = cluster_index + seqs.len();
+        let cluster = cluster_index + num_seqs;
         if step.dissimilarity <= cutoff {
             if membership[cluster].is_none() {
                 membership[cluster] = Some(num_groups);
@@ -159,10 +142,8 @@ pub fn cluster(seqs: &Vec<&[u8]>, max_seqs: usize) -> Vec<Vec<usize>> {
         }
     }
 
-    let mut groups = Vec::new();
-    groups.reserve(seqs.len());
-
-    for group in membership.into_iter().take(seqs.len()) {
+    let mut groups = Vec::with_capacity(num_seqs);
+    for group in membership.into_iter().take(num_seqs) {
         if let Some(group) = group {
             groups.push(group);
         } else {
@@ -173,7 +154,7 @@ pub fn cluster(seqs: &Vec<&[u8]>, max_seqs: usize) -> Vec<Vec<usize>> {
 
     let mut seqs_by_group = vec![Vec::new(); num_groups];
     for (seq_index, group) in groups.iter().enumerate() {
-        seqs_by_group[*group].push(orig_index[seq_index]);
+        seqs_by_group[*group].push(seq_index);
     }
 
     seqs_by_group
@@ -186,13 +167,21 @@ fn get_ci(seqs: &[&str]) -> (usize, usize) {
 }
 
 fn get_dist_matrix(seqs: &Vec<&[u8]>) -> Vec<f64> {
-    let dist_len = seqs.len() * (seqs.len() - 1);
-    let dist_len = (dist_len as f64 / 2.0) as usize;
-    let mut dists = Vec::new();
-    dists.reserve(dist_len);
-    for index1 in 0..seqs.len() {
-        for index2 in index1 + 1..seqs.len() {
-            let dist = levenshtein(seqs[index1], seqs[index2]);
+    let dist_len = seqs.len() * (seqs.len() - 1) / 2;
+    let mut dists = Vec::with_capacity(dist_len);
+    for (index1, seq1) in seqs.iter().enumerate() {
+        for (_index2, seq2) in seqs.iter().enumerate().skip(index1 + 1) {
+            let max_len = std::cmp::max(seq1.len(), seq2.len()) as u32;
+            let min_len = std::cmp::min(seq1.len(), seq2.len()) as u32;
+            let length_diff = max_len - min_len;
+
+            // we'll skip ED in cases we already know it will be too costly to do so.
+            const MAX_K: u32 = 500;
+            let dist = if length_diff <= MAX_K {
+                bounded_levenshtein(seq1, seq2, MAX_K).unwrap_or(MAX_K)
+            } else {
+                length_diff // lower bound on ED
+            };
             dists.push(dist as f64);
         }
     }
@@ -202,7 +191,6 @@ fn get_dist_matrix(seqs: &Vec<&[u8]>) -> Vec<f64> {
 
 fn align(backbone: &str, seqs: &[&str]) -> Vec<Alignment> {
     let mut aligner = Aligner::new(-5, -1, |a, b| if a == b { 1i32 } else { -1i32 });
-
     seqs.iter()
         .map(|seq| aligner.global(seq.as_bytes(), backbone.as_bytes()))
         .collect_vec()

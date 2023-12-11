@@ -41,14 +41,12 @@ pub fn clip_bases(read: &HiFiRead, left_len: usize, right_len: usize) -> Option<
     };
 
     Some(HiFiRead {
-        id: read.id.clone(),
         bases: clipped_bases,
         meth: clipped_meth,
-        read_qual: read.read_qual,
-        mismatch_offsets: read.mismatch_offsets.clone(),
-        start_offset: read.start_offset,
-        end_offset: read.end_offset,
         cigar: clipped_cigar,
+        id: read.id.clone(),
+        mismatch_offsets: read.mismatch_offsets.clone(),
+        ..*read
     })
 }
 
@@ -131,6 +129,8 @@ mod tests {
             start_offset: 0,
             end_offset: 0,
             cigar: Some(cigar),
+            hp_tag: None,
+            mapq: 60,
         }
     }
 

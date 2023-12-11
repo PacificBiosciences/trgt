@@ -85,6 +85,17 @@ assessment of tandem repeats at scale. bioRxiv. 2023](https://doi.org/10.1101/20
   - BAM files now contain read-to-allele assignments
   - Added support for gzip compressed repeat files
   - Improved error handling and error messages
+- 0.6.0
+  - Add alignment CIGARs to spanning.bam reads
+  - Increase read extraction region
+  - Cluster genotyper reports confidence intervals
+  - Improved error handling of invalid input files (genome, catalog
+    and reads)
+- 0.7.0
+  - Read phasing information can now be used during repeat genotyping (via `HP` tags)
+  - Users can now define complex repeats by specifying motif sequences in the MOTIFS field and setting STRUC to <`locus_name`>
+  - The original MAPQ values in the input reads are now reported in the BAM output
+  - BAMlet sample name can now be provided using the `--sample-name` flag; if it not provided, it is extracted from the input BAM or file stem (addressing issue #18)
 
 ### DISCLAIMER
 THIS WEBSITE AND CONTENT AND ALL SITE-RELATED SERVICES, INCLUDING ANY DATA, ARE 

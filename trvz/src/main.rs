@@ -14,7 +14,6 @@ mod align;
 mod cli;
 mod genotype_plot;
 mod hmm;
-mod hmm_defs;
 mod input;
 mod label_hmm;
 mod label_motifs;
@@ -91,30 +90,21 @@ fn create_image(plot: PipePlot, path: String) -> io::Result<()> {
 }
 
 fn open_catalog_reader(path: &PathBuf) -> Result<BufReader<Box<dyn ioRead>>> {
-    fn get_format(path: &Path) -> Option<&'static str> {
+    fn is_gzipped(path: &Path) -> bool {
         let path_str = path.to_string_lossy();
-        let formats = ["bed", "bed.gz", "bed.gzip"];
-        formats
-            .iter()
-            .find(|&&format| path_str.ends_with(format))
-            .copied()
+        let formats = [".gz", ".gzip", ".GZ", ".GZIP"];
+        formats.iter().any(|format| path_str.ends_with(*format))
     }
     let file = File::open(path).map_err(|e| e.to_string())?;
-    match get_format(path) {
-        Some("bed.gz") | Some("bed.gzip") => {
-            let gz_decoder = GzDecoder::new(file);
-            if gz_decoder.header().is_some() {
-                Ok(BufReader::new(Box::new(gz_decoder)))
-            } else {
-                Err(format!("Invalid gzip header: {}", path.to_string_lossy()).into())
-            }
+    if is_gzipped(path) {
+        let gz_decoder = GzDecoder::new(file);
+        if gz_decoder.header().is_some() {
+            Ok(BufReader::new(Box::new(gz_decoder)))
+        } else {
+            Err(format!("Invalid gzip header: {}", path.to_string_lossy()))
         }
-        Some("bed") => Ok(BufReader::new(Box::new(file))),
-        _ => Err(format!(
-            "Unknown bed format: {}. Supported formats are: .bed or .bed.gz(ip)",
-            path.to_string_lossy()
-        )
-        .into()),
+    } else {
+        Ok(BufReader::new(Box::new(file)))
     }
 }
 

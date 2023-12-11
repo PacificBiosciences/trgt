@@ -1,12 +1,87 @@
 use super::Gt;
+use crate::cluster::consensus::repair_consensus;
+use crate::cluster::math::median;
 use crate::{genotype::TrSize, reads::HiFiRead};
+use bio::alignment::{pairwise::*, Alignment};
 use itertools::Itertools;
 use std::cmp::Ordering;
 
 type Profile = Vec<Option<bool>>;
 
-pub fn genotype(reads: &Vec<HiFiRead>, tr_seqs: &[&str]) -> Option<(Gt, Vec<String>, Vec<i32>)> {
-    if reads.is_empty() {
+pub fn genotype(reads: &[HiFiRead], tr_seqs: &[&str]) -> Option<(Gt, Vec<String>, Vec<i32>)> {
+    let (trs_by_allele, mut allele_assignment) =
+        get_trs_with_hp(reads, tr_seqs).or_else(|| get_trs_with_clustering(reads, tr_seqs))?;
+    let mut gt = Gt::new();
+    let mut alleles = Vec::new();
+
+    for trs in trs_by_allele {
+        let (backbone, frequency) = simple_consensus(&trs)?;
+        const MIN_FREQ_TO_ALIGN: f64 = 0.5;
+        let allele = if frequency < MIN_FREQ_TO_ALIGN {
+            let aligns = align(&backbone, &trs);
+            repair_consensus(&backbone, &trs, &aligns)
+        } else {
+            backbone.to_string()
+        };
+
+        let min_tr_len = trs.iter().map(|tr| tr.len()).min().unwrap();
+        let max_tr_len = trs.iter().map(|tr| tr.len()).max().unwrap();
+
+        let size = TrSize::new(allele.len(), (min_tr_len, max_tr_len));
+        gt.push(size);
+        alleles.push(allele);
+    }
+
+    // Smaller allele should always appear first
+    if alleles[0].len() > alleles[1].len() {
+        gt.swap(0, 1);
+        alleles.swap(0, 1);
+        allele_assignment = allele_assignment.into_iter().map(|a| (a + 1) % 2).collect();
+    }
+
+    Some((gt, alleles, allele_assignment))
+}
+
+fn get_trs_with_hp<'a>(
+    reads: &[HiFiRead],
+    tr_seqs: &[&'a str],
+) -> Option<([Vec<&'a str>; 2], Vec<i32>)> {
+    let mut allele_assignment = Vec::new();
+    let mut trs_by_allele = [Vec::new(), Vec::new()];
+    let mut assignment_tie_breaker: usize = 1;
+    let mut num_unassigned = 0;
+    for (read, tr_seq) in reads.iter().zip(tr_seqs.iter()) {
+        match read.hp_tag {
+            Some(1) => {
+                allele_assignment.push(0_i32);
+                trs_by_allele[0].push(*tr_seq);
+            }
+            Some(2) => {
+                allele_assignment.push(1_i32);
+                trs_by_allele[1].push(*tr_seq);
+            }
+            _ => {
+                assignment_tie_breaker = (assignment_tie_breaker + 1) % 2;
+                allele_assignment.push(assignment_tie_breaker as i32);
+                trs_by_allele[assignment_tie_breaker].push(*tr_seq);
+                num_unassigned += 1;
+            }
+        }
+    }
+
+    let prop_assigned = (reads.len() - num_unassigned) as f64 / reads.len() as f64;
+    if !trs_by_allele[0].is_empty() && !trs_by_allele[1].is_empty() && prop_assigned >= 0.7 {
+        Some((trs_by_allele, allele_assignment))
+    } else {
+        None
+    }
+}
+
+fn get_trs_with_clustering<'a>(
+    reads: &[HiFiRead],
+    tr_seqs: &[&'a str],
+) -> Option<([Vec<&'a str>; 2], Vec<i32>)> {
+    if tr_seqs.is_empty() {
         return None;
     }
 
@@ -58,32 +133,7 @@ pub fn genotype(reads: &Vec<HiFiRead>, tr_seqs: &[&str]) -> Option<(Gt, Vec<Stri
         }
     }
 
-    let mut gt = Gt::new();
-    let mut alleles = Vec::new();
-
-    for trs in trs_by_allele {
-        let allele = simple_consensus(&trs);
-
-        let min_tr_len = trs.iter().map(|tr| tr.len()).min().unwrap();
-        let max_tr_len = trs.iter().map(|tr| tr.len()).max().unwrap();
-
-        let size = TrSize {
-            size: allele.len(),
-            ci: (min_tr_len, max_tr_len),
-        };
-
-        gt.push(size);
-        alleles.push(allele);
-    }
-
-    // Smaller allele should always appear first
-    if alleles[0].len() > alleles[1].len() {
-        gt.swap(0, 1);
-        alleles.swap(0, 1);
-        allele_assignment = allele_assignment.into_iter().map(|a| (a + 1) % 2).collect();
-    }
-
-    Some((gt, alleles, allele_assignment))
+    Some((trs_by_allele, allele_assignment))
 }
 
 fn get_dist(read: &[Option<bool>], allele: &[bool]) -> usize {
@@ -93,13 +143,25 @@ fn get_dist(read: &[Option<bool>], allele: &[bool]) -> usize {
         .sum()
 }
 
-fn simple_consensus(strs: &[&str]) -> String {
-    strs.iter()
-        .counts()
+/// Determine consensus for the input sequences
+///
+/// Return the most frequent sequence and its relative frequency.
+/// If multiple sequences have the same frequency,
+/// return the one whose length is closest to the median.
+///
+fn simple_consensus(seqs: &[&str]) -> Option<(String, f64)> {
+    let median_len = median(&seqs.iter().map(|s| s.len() as i32).collect_vec())? as usize;
+    let seq_to_count = seqs.iter().counts();
+    let top_group_size = *seq_to_count.values().max()?;
+    let consensus = seq_to_count
         .into_iter()
-        .max_by_key(|&(_, count)| count)
-        .map(|(s, _)| s.to_string())
-        .unwrap_or_default()
+        .filter(|(_, c)| *c == top_group_size)
+        .map(|(s, _)| (s, s.len().abs_diff(median_len)))
+        .min_by_key(|(_, delta)| *delta)
+        .map(|(s, _)| s.to_string())?;
+
+    let top_group_frequency = (top_group_size as f64) / (seqs.len() as f64);
+    Some((consensus, top_group_frequency))
 }
 
 fn get_loglik(gt: &(Vec<bool>, Vec<bool>), profiles: &Vec<Profile>) -> f64 {
@@ -206,7 +268,7 @@ fn get_profiles(reads: &[HiFiRead], snvs: &[i32]) -> Vec<Profile> {
     profiles
 }
 
-fn call_snvs(region: (i32, i32), reads: &Vec<HiFiRead>, min_freq: f64) -> Vec<i32> {
+fn call_snvs(region: (i32, i32), reads: &[HiFiRead], min_freq: f64) -> Vec<i32> {
     let offset_counts = reads
         .iter()
         .filter_map(|r| r.mismatch_offsets.as_ref())
@@ -221,6 +283,13 @@ fn call_snvs(region: (i32, i32), reads: &Vec<HiFiRead>, min_freq: f64) -> Vec<i3
         .map(|(offset, _)| *offset)
         .sorted()
         .collect()
+}
+
+fn align(backbone: &str, seqs: &[&str]) -> Vec<Alignment> {
+    let mut aligner = Aligner::new(-5, -1, |a, b| if a == b { 1i32 } else { -1i32 });
+    seqs.iter()
+        .map(|seq| aligner.global(seq.as_bytes(), backbone.as_bytes()))
+        .collect_vec()
 }
 
 #[cfg(test)]
@@ -262,6 +331,8 @@ mod tests {
             start_offset,
             end_offset,
             cigar: None,
+            hp_tag: None,
+            mapq: 60,
         }
     }
 

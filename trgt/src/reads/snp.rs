@@ -36,8 +36,7 @@ pub fn extract_snps(cigar: &Cigar, region: &GenomicRegion) -> Vec<u32> {
     mismatches
 }
 
-// Collect all positions in a read that are mismatches relative to the starting point of the region
-#[allow(dead_code)]
+// Collect all positions in a read that are mismatches relative to the starting and ending point of the region
 pub fn extract_snps_offset(cigar: &Cigar, region: &GenomicRegion) -> Vec<i32> {
     let mut mismatches: Vec<i32> = Vec::new();
     let mut start_ref = cigar.ref_pos as u32;

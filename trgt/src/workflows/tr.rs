@@ -1,10 +1,9 @@
 use crate::cluster;
 use crate::genotype::{self, flank_genotype, Gt};
 use crate::label::label_alleles;
-use crate::locate::{Locator, TrgtScoring};
+use crate::locate::{find_tr_spans, TrgtScoring};
 use crate::locus::{Genotyper, Locus};
 use crate::reads::{clip_to_region, HiFiRead};
-use crate::snp;
 use crate::workflows::{Allele, Genotype, LocusResult};
 use itertools::Itertools;
 use rust_htslib::bam;
@@ -28,15 +27,13 @@ pub fn analyze(
     if locus.ploidy == genotype::Ploidy::Zero {
         return Ok(LocusResult::empty());
     }
-    let mut reads = extract_reads(
+    let reads = extract_reads(
         locus,
-        params.search_flank_len as u32,
         bam,
+        params.search_flank_len as u32,
         params.min_read_qual,
     )?;
     log::debug!("{}: Collected {} reads", locus.id, reads.len());
-
-    snp::analyze_snps(&mut reads, &locus.region);
 
     let clip_radius = 500;
     let reads = clip_reads(locus, clip_radius, reads);
@@ -108,12 +105,7 @@ fn get_spanning_reads(
     params: &Params,
     reads: Vec<HiFiRead>,
 ) -> (Vec<HiFiRead>, Vec<(usize, usize)>) {
-    let mut locator = Locator::new(
-        &locus.left_flank,
-        &locus.right_flank,
-        params.search_flank_len,
-    );
-    let tr_spans = locator.locate(&reads, params);
+    let tr_spans = find_tr_spans(&locus.left_flank, &locus.right_flank, &reads, params);
 
     let reads_and_spans = reads
         .into_iter()
@@ -269,8 +261,8 @@ fn assign_read(gt: &Gt, tr_len: usize) -> Assignment {
 
 fn extract_reads(
     locus: &Locus,
-    flank_len: u32,
     bam: &mut bam::IndexedReader,
+    flank_len: u32,
     min_read_qual: f64,
 ) -> Result<Vec<HiFiRead>> {
     let mut reads = Vec::new();

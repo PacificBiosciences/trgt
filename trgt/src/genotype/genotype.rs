@@ -30,6 +30,10 @@ pub fn genotype(ploidy: Ploidy, seqs: &Vec<&str>) -> (Gt, Vec<String>, Vec<i32>)
     }
     alleles = fixed_alleles;
 
+    if ploidy == Ploidy::Two && alleles.len() == 1 {
+        alleles.push(alleles[0].clone());
+    }
+
     let mut classifications = vec![0_i32; seqs.len()];
     let mut tie_breaker = 1;
     for (seq, classification) in seqs.iter().zip(classifications.iter_mut()) {
@@ -45,10 +49,6 @@ pub fn genotype(ploidy: Ploidy, seqs: &Vec<&str>) -> (Gt, Vec<String>, Vec<i32>)
                 }
             };
         }
-    }
-    // allele_seqs is expected to contain two elements
-    if alleles.len() == 1 {
-        alleles.push(alleles[0].clone());
     }
 
     (gt, alleles, classifications)

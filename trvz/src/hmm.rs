@@ -5,9 +5,17 @@ use std::collections::HashMap;
 // lp = log probability
 // ems = emissions
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Span {
+    pub motif_index: usize,
+    pub start: usize,
+    pub end: usize,
+}
+
 type MatF64 = Vec<Vec<f64>>;
 type MatInt = Vec<Vec<usize>>;
 
+#[derive(Debug, PartialEq)]
 pub struct Hmm {
     num_states: usize,
     ems: MatF64,
@@ -16,6 +24,7 @@ pub struct Hmm {
     pub motifs: Vec<HmmMotif>,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct HmmMotif {
     pub start_state: usize,
     pub end_state: usize,
@@ -88,6 +97,7 @@ impl Hmm {
             }
         }
 
+        //TODO: Investigate "em_term != 0.0"
         if index == 0 && in_states.is_empty() && em_term.is_finite() {
             max_score = em_term;
             best_state = Some(&state);
@@ -152,7 +162,7 @@ impl Hmm {
         self.traceback(&query, &states)
     }
 
-    pub fn label_motifs(&self, states: &Vec<usize>) -> Vec<(usize, usize, usize)> {
+    pub fn label_motifs(&self, states: &Vec<usize>) -> Vec<Span> {
         let state_to_motif: HashMap<usize, usize> = self
             .motifs
             .iter()
@@ -160,7 +170,7 @@ impl Hmm {
             .map(|(index, m)| (m.start_state, index))
             .collect();
 
-        let mut motif_spans: Vec<(usize, usize, usize)> = Vec::new();
+        let mut motif_spans: Vec<Span> = Vec::new();
         let mut state_index = 0;
         while state_index < states.len() {
             let state = states[state_index];
@@ -183,11 +193,15 @@ impl Hmm {
                 let motif_start = if motif_spans.is_empty() {
                     0
                 } else {
-                    motif_spans.last().unwrap().1
+                    motif_spans.last().unwrap().end
                 };
                 let motif_end = motif_start + motif_span;
 
-                motif_spans.push((motif_start, motif_end, motif_index));
+                motif_spans.push(Span {
+                    motif_index,
+                    start: motif_start,
+                    end: motif_end,
+                });
             } else {
                 assert!(!self.emits_base(state));
                 state_index += 1;
@@ -249,8 +263,7 @@ fn encode_base(base: u8) -> u8 {
     }
 }
 
-/*
-#[cfg(test)]
+/*#[cfg(test)]
 mod tests {
     use super::*;
     use approx::assert_relative_eq;

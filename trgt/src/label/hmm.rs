@@ -1,7 +1,6 @@
+use super::spans::Span;
 use itertools::Itertools;
 use std::collections::HashMap;
-
-use super::Span;
 
 // List of abbreviations
 // lp = log probability
@@ -10,14 +9,16 @@ use super::Span;
 type MatF64 = Vec<Vec<f64>>;
 type MatInt = Vec<Vec<usize>>;
 
+#[derive(Debug, PartialEq)]
 pub struct Hmm {
-    num_states: usize,
-    ems: MatF64,
+    pub num_states: usize,
+    pub ems: MatF64,
     in_states: MatInt,
     in_lps: MatF64,
     pub motifs: Vec<HmmMotif>,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct HmmMotif {
     pub start_state: usize,
     pub end_state: usize,
@@ -145,6 +146,9 @@ impl Hmm {
     }
 
     pub fn label(&self, query: &str) -> Vec<usize> {
+        if query.is_empty() {
+            return Vec::new();
+        }
         let query = "#"
             .bytes()
             .chain(query.bytes().chain("#".bytes()))
@@ -204,7 +208,7 @@ impl Hmm {
         motif_spans
     }
 
-    fn emits_base(&self, state: usize) -> bool {
+    pub fn emits_base(&self, state: usize) -> bool {
         self.ems[state].iter().skip(1).any(|e| e.is_finite())
     }
 

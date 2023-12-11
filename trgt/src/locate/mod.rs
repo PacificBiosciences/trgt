@@ -1,5 +1,5 @@
 mod locate;
-pub use locate::Locator;
+pub use locate::find_tr_spans;
 pub use locate::TrgtScoring;
 
 mod consensus;

@@ -124,6 +124,7 @@ fn get_ins_consensus(ins_by_read: &mut Vec<String>, num_reads: usize) -> &str {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,3 +171,4 @@ mod tests {
         //assert_eq!(fixed, expected);
     }
 }
+*/

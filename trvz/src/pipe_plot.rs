@@ -20,6 +20,8 @@ pub enum Color {
     Yellow,
     Red,
     Khaki,
+    PaleRed,
+    PaleBlue,
     Grad(f64),
 }
 
@@ -85,6 +87,8 @@ pub fn encode_color(color: &Color) -> String {
         Color::Green => "#009D4E".to_string(),
         Color::Red => "#E3371E".to_string(),
         Color::Khaki => "#F0E68C".to_string(),
+        Color::PaleRed => "#FF4858".to_string(),
+        Color::PaleBlue => "#46B2E8".to_string(),
         Color::Grad(value) => get_gradient(*value),
     }
 }
@@ -454,6 +458,8 @@ pub fn get_color(locus: &Locus, op: AlignmentOperation, label: &RegionLabel) -> 
         Color::Green,
         Color::Red,
         Color::Khaki,
+        Color::PaleRed,
+        Color::PaleBlue,
     ];
 
     if op == AlignOp::Subst {
@@ -466,7 +472,7 @@ pub fn get_color(locus: &Locus, op: AlignmentOperation, label: &RegionLabel) -> 
 
     match label {
         RegionLabel::Flank(_, _) => Color::Teal,
-        RegionLabel::Seq(_, _) => Color::Teal,
+        RegionLabel::Seq(_, _) => Color::LightGray,
         RegionLabel::Tr(_, _, motif) => {
             let index = locus.motifs.iter().position(|m| m == motif).unwrap();
             tr_colors[index % tr_colors.len()].clone()

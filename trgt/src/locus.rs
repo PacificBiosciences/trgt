@@ -1,82 +1,10 @@
+use crate::faidx;
 use crate::genotype::Ploidy;
-use crate::utils::{self, GenomicRegion};
-use rust_htslib::faidx;
-use std::collections::{HashMap, HashSet};
-use std::fs;
+use crate::karyotype::Karyotype;
+use crate::utils::GenomicRegion;
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read as ioRead};
 use std::str::FromStr;
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct Karyotype {
-    ploidy: PloidyInfo,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-enum PloidyInfo {
-    PresetXX,
-    PresetXY,
-    Custom(HashMap<String, Ploidy>),
-}
-
-impl Karyotype {
-    pub fn new(encoding: &str) -> Result<Self, String> {
-        match encoding {
-            "XX" => Ok(Self {
-                ploidy: PloidyInfo::PresetXX,
-            }),
-            "XY" => Ok(Self {
-                ploidy: PloidyInfo::PresetXY,
-            }),
-            _ => Self::from_file(encoding),
-        }
-    }
-
-    fn from_file(path: &str) -> Result<Self, String> {
-        let contents = fs::read_to_string(path).map_err(|e| format!("File {}: {}", path, e))?;
-
-        let ploidies = contents
-            .lines()
-            .map(|line| {
-                let mut parts = line.split_whitespace();
-                let chrom = parts.next().ok_or("Missing chromosome".to_string())?;
-                let ploidy_str = parts.next().ok_or("Missing ploidy".to_string())?;
-                let ploidy = ploidy_str
-                    .parse()
-                    .map_err(|e: String| format!("Invalid ploidy: {}", e))?;
-                Ok((chrom.to_string(), ploidy))
-            })
-            .collect::<Result<HashMap<_, _>, String>>()?;
-
-        Ok(Self {
-            ploidy: PloidyInfo::Custom(ploidies),
-        })
-    }
-
-    pub fn get_ploidy(&self, chrom: &str) -> Result<Ploidy, String> {
-        let is_on_chrx = chrom == "X" || chrom == "chrX";
-        let is_on_chry = chrom == "Y" || chrom == "chrY";
-        match &self.ploidy {
-            PloidyInfo::PresetXX => {
-                if is_on_chry {
-                    Ok(Ploidy::Zero)
-                } else {
-                    Ok(Ploidy::Two)
-                }
-            }
-            PloidyInfo::PresetXY => {
-                if is_on_chrx || is_on_chry {
-                    Ok(Ploidy::One)
-                } else {
-                    Ok(Ploidy::Two)
-                }
-            }
-            PloidyInfo::Custom(ploidies) => ploidies
-                .get(chrom)
-                .copied()
-                .ok_or_else(|| format!("Ploidy was not specified for chromosome: {}", chrom)),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 pub enum Genotyper {
@@ -101,7 +29,7 @@ pub struct Locus {
     pub left_flank: String,
     pub tr: String,
     pub right_flank: String,
-    pub region: utils::GenomicRegion,
+    pub region: GenomicRegion,
     pub motifs: Vec<String>,
     pub struc: String,
     pub ploidy: Ploidy,
@@ -111,23 +39,34 @@ pub struct Locus {
 impl Locus {
     pub fn new(
         genome_reader: &faidx::Reader,
-        chrom_lookup: &HashSet<String>,
+        chrom_lookup: &HashMap<String, u32>,
         line: &str,
         flank_len: usize,
         karyotype: &Karyotype,
         genotyper: Genotyper,
     ) -> Result<Self, String> {
+        const EXPECTED_FIELD_COUNT: usize = 4;
         let split_line: Vec<&str> = line.split_whitespace().collect();
-        if split_line.len() != 4 {
-            return Err(format!("Expected 4 fields, found {}", split_line.len()));
+        if split_line.len() != EXPECTED_FIELD_COUNT {
+            return Err(format!(
+                "Expected {} fields in the format 'chrom start end info', found {}: {}",
+                EXPECTED_FIELD_COUNT,
+                split_line.len(),
+                line
+            ));
         }
 
-        let (chrom, start, end) = (split_line[0], split_line[1], split_line[2]);
+        let (chrom, start, end, info_fields) = match &split_line[..] {
+            [chrom, start, end, info_fields] => (*chrom, *start, *end, *info_fields),
+            _ => unreachable!(),
+        };
+
         let region = GenomicRegion::new(&format!("{}:{}-{}", chrom, start, end))?;
+
+        check_region_bounds(&region, flank_len, chrom_lookup)?;
 
         let ploidy = karyotype.get_ploidy(chrom)?;
 
-        let info_fields = split_line[3];
         let fields = decode_fields(info_fields)?;
 
         let get_field = |key: &str| {
@@ -144,8 +83,7 @@ impl Locus {
             .collect();
         let struc = get_field("STRUC")?;
 
-        let (left_flank, tr, right_flank) =
-            get_tr_and_flanks(genome_reader, chrom_lookup, &region, flank_len)?;
+        let (left_flank, tr, right_flank) = get_tr_and_flanks(genome_reader, &region, flank_len)?;
 
         Ok(Locus {
             id,
@@ -161,16 +99,14 @@ impl Locus {
     }
 }
 
-pub fn get_loci<'a>(
+pub fn get_loci(
     catalog_reader: BufReader<Box<dyn ioRead>>,
-    genome_reader: &'a faidx::Reader,
+    genome_reader: &faidx::Reader,
+    karyotype: Karyotype,
     flank_len: usize,
-    karyotype: &'a Karyotype,
     genotyper: Genotyper,
-) -> impl Iterator<Item = Result<Locus, String>> + 'a {
-    let chrom_lookup: HashSet<String> = (0..genome_reader.n_seqs())
-        .filter_map(|i| genome_reader.seq_name(i as i32).ok())
-        .collect();
+) -> impl Iterator<Item = Result<Locus, String>> + '_ {
+    let chrom_lookup = genome_reader.create_chrom_lookup().unwrap();
 
     catalog_reader
         .lines()
@@ -182,7 +118,7 @@ pub fn get_loci<'a>(
                     &chrom_lookup,
                     &line,
                     flank_len,
-                    karyotype,
+                    &karyotype,
                     genotyper,
                 ) {
                     Ok(locus) => Some(Ok(locus)),
@@ -195,71 +131,83 @@ pub fn get_loci<'a>(
 
 fn get_tr_and_flanks(
     genome: &faidx::Reader,
-    chrom_lookup: &HashSet<String>,
-    region: &utils::GenomicRegion,
+    region: &GenomicRegion,
     flank_len: usize,
 ) -> Result<(String, String, String), String> {
-    let (lf_start, lf_end) = (region.start as usize - flank_len, region.start as usize);
-    let (rf_start, rf_end) = (region.end as usize, region.end as usize + flank_len);
+    let fetch_flank = |start: usize, end: usize| {
+        genome
+            .fetch_seq_string(&region.contig, start, end)
+            .map_err(|e| {
+                format!(
+                    "Error fetching sequence for region {}:{}-{}: {}",
+                    &region.contig, start, end, e
+                )
+            })
+            .map(|seq| seq.to_uppercase())
+    };
 
-    // TODO: This is necessary because faidx is unsafe and segfaults when
-    // the region is invalid, so we need to fail gracefully in the event of
-    // a bad input. Should be removed if rust_htslib addresses this.
-    if !chrom_lookup.contains(&region.contig) {
-        return Err(format!(
-            "FASTA reference does not contain chromosome '{}' in BED file",
-            region.contig
-        ));
-    }
+    let left_flank = fetch_flank(region.start as usize - flank_len, region.start as usize - 1)?;
+    let tr = fetch_flank(region.start as usize, region.end as usize - 1)?;
+    let right_flank = fetch_flank(region.end as usize, region.end as usize + flank_len - 1)?;
 
-    let left_flank = genome
-        .fetch_seq_string(&region.contig, lf_start, lf_end - 1)
-        .map_err(|e| e.to_string())?;
-    let tr = genome
-        .fetch_seq_string(
-            &region.contig,
-            region.start as usize,
-            region.end as usize - 1,
-        )
-        .map_err(|e| e.to_string())?;
-    let right_flank = genome
-        .fetch_seq_string(&region.contig, rf_start, rf_end - 1)
-        .map_err(|e| e.to_string())?;
-    Ok((
-        left_flank.to_uppercase(),
-        tr.to_uppercase(),
-        right_flank.to_uppercase(),
-    ))
+    Ok((left_flank, tr, right_flank))
 }
 
 fn decode_fields(info_fields: &str) -> Result<HashMap<&str, String>, String> {
     let mut fields = HashMap::new();
     for field_encoding in info_fields.split(';') {
-        let (name, value) = decode_info_field(field_encoding)?;
+        let (name, value) = decode_info_field(field_encoding).map_err(|e| e.to_string())?;
         if fields.insert(name, value.to_string()).is_some() {
-            return Err(format!("Duplicate field: {}", name));
+            return Err(format!("Duplicate field name: '{}'", name));
         }
     }
     Ok(fields)
 }
 
 fn decode_info_field(encoding: &str) -> Result<(&str, &str), String> {
-    if encoding.is_empty() {
-        return Err("Field is empty".to_string());
+    let error_message = || format!("Field must be in 'name=value' format: '{}'", encoding);
+    let parts: Vec<&str> = encoding.splitn(2, '=').collect();
+    if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
+        Err(error_message())
+    } else {
+        Ok((parts[0], parts[1]))
+    }
+}
+
+fn check_region_bounds(
+    region: &GenomicRegion,
+    flank_len: usize,
+    chrom_lookup: &HashMap<String, u32>,
+) -> Result<(), String> {
+    let chrom_length = *chrom_lookup.get(&region.contig).ok_or_else(|| {
+        format!(
+            "FASTA reference does not contain chromosome '{}' in BED file",
+            &region.contig
+        )
+    })?;
+
+    let flank_len_u32 = flank_len as u32;
+
+    if region.start < flank_len_u32 + 1 {
+        return Err(format!(
+            "Region start '{}' with flank length '{}' underflows for chromosome '{}'.",
+            region.start, flank_len, &region.contig
+        ));
     }
 
-    let mut name_and_value = encoding.splitn(2, '=');
-    let error_message = || format!("Invalid field entry: {}", encoding);
+    let adjusted_end = region.end.checked_add(flank_len_u32).ok_or_else(|| {
+        format!(
+            "Region end '{}' with flank length '{}' overflows for chromosome '{}'.",
+            region.end, flank_len, &region.contig
+        )
+    })?;
 
-    let name = name_and_value
-        .next()
-        .filter(|s| !s.is_empty())
-        .ok_or_else(error_message)?;
+    if adjusted_end > chrom_length {
+        return Err(format!(
+            "Region end '{}' with flank length '{}' exceeds chromosome '{}' bounds (0..{}).",
+            adjusted_end, flank_len, &region.contig, chrom_length
+        ));
+    }
 
-    let value = name_and_value
-        .next()
-        .filter(|s| !s.is_empty())
-        .ok_or_else(error_message)?;
-
-    Ok((name, value))
+    Ok(())
 }

@@ -16,14 +16,13 @@
 //!         --output-prefix sample
 //! ```
 
-use crate::read_output::BamWriter;
-use crate::vcf::VcfWriter;
 use cli::{get_cli_params, handle_error_and_exit};
 use flate2::read::GzDecoder;
-use locus::Karyotype;
+use karyotype::Karyotype;
+use rust_htslib::bam;
 use rust_htslib::bam::Read;
-use rust_htslib::{bam, faidx};
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufReader, Read as ioRead};
 use std::path::{Path, PathBuf};
@@ -32,18 +31,19 @@ use std::sync::Arc;
 use std::{thread, time};
 use threadpool::ThreadPool;
 use workflows::analyze_tr;
+use writers::{BamWriter, VcfWriter};
 mod cli;
 mod cluster;
+mod faidx;
 mod genotype;
+mod karyotype;
 mod label;
 mod locate;
 mod locus;
-mod read_output;
 mod reads;
-mod snp;
 mod utils;
-mod vcf;
 mod workflows;
+mod writers;
 
 pub type Result<T> = std::result::Result<T, String>;
 
@@ -58,64 +58,9 @@ thread_local! {
 }
 
 pub fn get_bam_header(bam_path: &PathBuf) -> Result<bam::Header> {
-    let bam = match bam::IndexedReader::from_path(bam_path) {
-        Ok(reader) => reader,
-        Err(e) => return Err(format!("Failed to create bam reader: {}", e)),
-    };
-    let bam_header = bam::Header::from_template(bam.header());
-    Ok(bam_header)
-}
-
-fn get_sample_name(reads_path: &Path) -> String {
-    reads_path
-        .file_stem()
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_string()
-}
-
-fn create_writer<T, F>(output_prefix: &str, output_suffix: &str, f: F) -> Result<T>
-where
-    F: FnOnce(&str) -> Result<T>,
-{
-    let output_path = format!("{}.{}", output_prefix, output_suffix);
-    f(&output_path).map_err(|e| {
-        eprintln!("Error creating writer: {}", e);
-        e
-    })
-}
-
-fn open_catalog_reader(path: &PathBuf) -> Result<BufReader<Box<dyn ioRead>>> {
-    fn get_format(path: &Path) -> Option<&'static str> {
-        let path_str = path.to_string_lossy();
-        let formats = ["bed", "bed.gz", "bed.gzip"];
-        formats
-            .iter()
-            .find(|&&format| path_str.ends_with(format))
-            .copied()
-    }
-    let file = File::open(path).map_err(|e| e.to_string())?;
-    match get_format(path) {
-        Some("bed.gz") | Some("bed.gzip") => {
-            let gz_decoder = GzDecoder::new(file);
-            if gz_decoder.header().is_some() {
-                Ok(BufReader::new(Box::new(gz_decoder)))
-            } else {
-                Err(format!("Invalid gzip header: {}", path.to_string_lossy()))
-            }
-        }
-        Some("bed") => Ok(BufReader::new(Box::new(file))),
-        _ => Err(format!(
-            "Unknown bed format: {}. Supported formats are: .bed or .bed.gz(ip)",
-            path.to_string_lossy()
-        )),
-    }
-}
-
-fn open_genome_reader(path: &PathBuf) -> Result<faidx::Reader> {
-    let reader = faidx::Reader::from_path(path).map_err(|e| e.to_string())?;
-    Ok(reader)
+    let bam = bam::IndexedReader::from_path(bam_path)
+        .map_err(|e| format!("Failed to create bam reader: {}", e))?;
+    Ok(bam::Header::from_template(bam.header()))
 }
 
 fn is_bam_mapped(bam_header: &bam::Header) -> bool {
@@ -129,7 +74,82 @@ fn is_bam_mapped(bam_header: &bam::Header) -> bool {
     false
 }
 
-fn main() -> Result<()> {
+fn get_sample_name(reads_path: &PathBuf) -> Result<String> {
+    let bam_header = get_bam_header(reads_path)?;
+
+    let header_hashmap = bam_header.to_hashmap();
+    let mut sample_names = HashSet::new();
+
+    if let Some(rg_fields) = header_hashmap.get("RG") {
+        for rg_field in rg_fields {
+            if let Some(sample_name) = rg_field.get("SM") {
+                sample_names.insert(sample_name.to_owned());
+            }
+        }
+    }
+
+    match sample_names.len() {
+        1 => return Ok(sample_names.into_iter().next().unwrap()),
+        0 => log::warn!("No sample names found"),
+        _ => log::warn!("Multiple sample names found"),
+    };
+
+    let sample = reads_path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .ok_or("Invalid reads file name")?
+        .to_string();
+
+    Ok(sample)
+}
+
+fn create_writer<T, F>(output_prefix: &str, output_suffix: &str, f: F) -> Result<T>
+where
+    F: FnOnce(&str) -> Result<T>,
+{
+    let output_path = format!("{}.{}", output_prefix, output_suffix);
+    f(&output_path)
+}
+
+fn open_catalog_reader(path: &PathBuf) -> Result<BufReader<Box<dyn ioRead>>> {
+    fn is_gzipped(path: &Path) -> bool {
+        let path_str = path.to_string_lossy();
+        let formats = [".gz", ".gzip", ".GZ", ".GZIP"];
+        formats.iter().any(|format| path_str.ends_with(*format))
+    }
+    let file = File::open(path).map_err(|e| e.to_string())?;
+    if is_gzipped(path) {
+        let gz_decoder = GzDecoder::new(file);
+        if gz_decoder.header().is_some() {
+            Ok(BufReader::new(Box::new(gz_decoder)))
+        } else {
+            Err(format!("Invalid gzip header: {}", path.to_string_lossy()))
+        }
+    } else {
+        Ok(BufReader::new(Box::new(file)))
+    }
+}
+
+fn open_genome_reader(path: &Path) -> Result<faidx::Reader> {
+    let extension = path.extension().unwrap().to_str().unwrap();
+    let fai_path = path.with_extension(extension.to_owned() + ".fai");
+    if !fai_path.exists() {
+        return Err(format!(
+            "Reference index file not found: {}. Create it using 'samtools faidx {}'",
+            fai_path.display(),
+            path.display()
+        ));
+    }
+    faidx::Reader::from_path(path).map_err(|e| e.to_string())
+}
+
+fn main() {
+    if let Err(e) = run_trgt() {
+        handle_error_and_exit(e);
+    }
+}
+
+fn run_trgt() -> Result<()> {
     let params = get_cli_params();
 
     log::info!(
@@ -139,26 +159,23 @@ fn main() -> Result<()> {
     );
     let start_timer = time::Instant::now();
 
-    let karyotype =
-        Karyotype::new(&params.karyotype).unwrap_or_else(|err| handle_error_and_exit(err));
+    let karyotype = Karyotype::new(&params.karyotype)?;
 
-    let search_flank_len = params.flank_len;
-    let output_flank_len = std::cmp::min(search_flank_len, 50);
-    let sample_name = get_sample_name(&params.reads_path);
+    let sample_name = params
+        .sample_name
+        .unwrap_or(get_sample_name(&params.reads_path)?);
 
-    let catalog_reader =
-        open_catalog_reader(&params.repeats_path).unwrap_or_else(|err| handle_error_and_exit(err));
+    let catalog_reader = open_catalog_reader(&params.repeats_path)?;
     let genome_reader = open_genome_reader(&params.genome_path)?;
 
     let all_loci = locus::get_loci(
         catalog_reader,
         &genome_reader,
-        search_flank_len,
-        &karyotype,
+        karyotype,
+        params.flank_len,
         params.genotyper,
     )
-    .collect::<Result<Vec<_>>>()
-    .unwrap_or_else(|err| handle_error_and_exit(err));
+    .collect::<Result<Vec<_>>>()?;
 
     let bam_header = get_bam_header(&params.reads_path)?;
     if !is_bam_mapped(&bam_header) {
@@ -168,8 +185,10 @@ fn main() -> Result<()> {
     let mut vcf_writer = create_writer(&params.output_prefix, "vcf.gz", |path| {
         VcfWriter::new(path, &sample_name, &bam_header)
     })?;
+
+    let output_flank_len = std::cmp::min(params.flank_len, 50);
     let mut bam_writer = create_writer(&params.output_prefix, "spanning.bam", |path| {
-        BamWriter::new(path, bam_header)
+        BamWriter::new(path, bam_header, output_flank_len)
     })?;
 
     log::info!("Starting job pool with {} threads...", params.num_threads);
@@ -179,13 +198,13 @@ fn main() -> Result<()> {
     let writer_thread = thread::spawn(move || {
         for (locus, results) in &receiver {
             vcf_writer.write(&locus, &results);
-            bam_writer.write(&locus, output_flank_len, &results);
+            bam_writer.write(&locus, &results);
         }
     });
 
     let reads_path = Arc::new(params.reads_path.clone());
     let workflow_params = Arc::new(workflows::Params {
-        search_flank_len,
+        search_flank_len: params.flank_len,
         min_read_qual: params.min_hifi_read_qual,
         max_depth: params.max_depth,
         aln_scoring: params.aln_scoring,
@@ -211,7 +230,7 @@ fn main() -> Result<()> {
                         sender.send((locus, results)).unwrap();
                     }
                     Err(err) => {
-                        eprintln!("Error occurred while analyzing: {}", err);
+                        log::error!("Error occurred while analyzing: {}", err);
                     }
                 }
             });

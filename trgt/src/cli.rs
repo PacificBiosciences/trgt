@@ -70,6 +70,13 @@ pub struct CliParams {
     #[clap(default_value = "XX")]
     pub karyotype: String,
 
+    #[clap(long = "sample-name")]
+    #[clap(value_name = "SAMPLE_NAME")]
+    #[clap(help = "Sample name")]
+    #[clap(default_value = None)]
+    #[arg(value_parser = check_sample_name_nonempty)]
+    pub sample_name: Option<String>,
+
     #[clap(long = "max-depth")]
     #[clap(value_name = "MAX_DEPTH")]
     #[clap(help = "Maximum locus depth")]
@@ -94,7 +101,7 @@ pub struct CliParams {
     pub aln_scoring: TrgtScoring,
 
     #[clap(help_heading("Advanced"))]
-    #[clap(long = "min-flank-id-perc")]
+    #[clap(long = "min-flank-id-frac")]
     #[clap(value_name = "PERC")]
     #[clap(help = "Minimum fraction of matches in a flank sequence to consider it 'found'")]
     #[clap(default_value = "0.7")]
@@ -196,6 +203,14 @@ fn check_file_exists(s: &str) -> Result<PathBuf, String> {
         Err(format!("File does not exist: {}", path.display()))
     } else {
         Ok(path.to_path_buf())
+    }
+}
+
+fn check_sample_name_nonempty(s: &str) -> Result<String, String> {
+    if s.trim().is_empty() {
+        Err("Sample name cannot be an empty string".to_string())
+    } else {
+        Ok(s.to_string())
     }
 }
 

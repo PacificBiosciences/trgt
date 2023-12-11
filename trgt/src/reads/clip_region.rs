@@ -44,15 +44,12 @@ pub fn clip_to_region(read: HiFiRead, region: (i64, i64)) -> Option<HiFiRead> {
         ref_pos: clipped_ref_start,
         ops: clipped_cigar,
     };
+
     Some(HiFiRead {
-        id: read.id,
         bases: clipped_bases,
         meth: clipped_meth,
-        read_qual: read.read_qual,
-        mismatch_offsets: read.mismatch_offsets,
-        start_offset: read.start_offset,
-        end_offset: read.end_offset,
         cigar: Some(cigar),
+        ..read
     })
 }
 
@@ -132,16 +129,19 @@ fn clip_cigar(cigar: &Cigar, region: (i64, i64)) -> Option<(i64, i64, Vec<CigarO
     }
 
     // Split operation overlapping the right flank (if any)
-    if current_op.is_some() && ref_pos < region_end {
-        let ref_inside_len = region_end - ref_pos;
-        clipped_ops.push(match current_op.unwrap() {
-            CigarOp::Match(_) => CigarOp::Match(ref_inside_len as u32),
-            CigarOp::RefSkip(_) => CigarOp::RefSkip(ref_inside_len as u32),
-            CigarOp::Del(_) => CigarOp::Del(ref_inside_len as u32),
-            CigarOp::Equal(_) => CigarOp::Equal(ref_inside_len as u32),
-            CigarOp::Diff(_) => CigarOp::Diff(ref_inside_len as u32),
-            op => panic!("Unexpected operation {:?}", op),
-        });
+    if let Some(op) = current_op {
+        if ref_pos < region_end {
+            let ref_inside_len = (region_end - ref_pos) as u32;
+            let clipped_op = match op {
+                CigarOp::Match(_) => CigarOp::Match(ref_inside_len),
+                CigarOp::RefSkip(_) => CigarOp::RefSkip(ref_inside_len),
+                CigarOp::Del(_) => CigarOp::Del(ref_inside_len),
+                CigarOp::Equal(_) => CigarOp::Equal(ref_inside_len),
+                CigarOp::Diff(_) => CigarOp::Diff(ref_inside_len),
+                _ => panic!("Unexpected operation {:?}", op),
+            };
+            clipped_ops.push(clipped_op);
+        }
     }
 
     Some((clipped_ref_start, clipped_query_start, clipped_ops))
@@ -184,6 +184,8 @@ mod tests {
             start_offset: 0,
             end_offset: 0,
             cigar: Some(cigar),
+            hp_tag: None,
+            mapq: 60,
         }
     }
 

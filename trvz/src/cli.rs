@@ -17,7 +17,7 @@ lazy_static! {
 #[derive(Parser)]
 #[command(name="trvz",
           author="Egor Dolzhenko <edolzhenko@pacificbiosciences.com>\nGuilherme De Sena Brandine <gbrandine@pacificbiosciences.com>\nTom Mokveld <tmokveld@pacificbiosciences.com>", 
-          version=&**FULL_VERSION, 
+          version=&**FULL_VERSION,
           about="Tandem Repeat Visualizer", 
           long_about = None,
           after_help = format!("Copyright (C) 2004-{}     Pacific Biosciences of California, Inc.

@@ -9,6 +9,7 @@ use std::env;
 
 pub struct BamWriter {
     writer: bam::Writer,
+    output_flank_len: usize,
 }
 
 impl BamWriter {
@@ -27,27 +28,34 @@ impl BamWriter {
         header
     }
 
-    pub fn new(output_bam_path: &str, bam_header: bam::Header) -> Result<BamWriter, String> {
+    pub fn new(
+        output_bam_path: &str,
+        bam_header: bam::Header,
+        output_flank_len: usize,
+    ) -> Result<BamWriter, String> {
         let bam_header = Self::update_header(bam_header);
         let writer = bam::Writer::from_path(output_bam_path, &bam_header, bam::Format::Bam)
             .map_err(|e| e.to_string())?;
-        Ok(BamWriter { writer })
+        Ok(BamWriter {
+            writer,
+            output_flank_len,
+        })
     }
 
-    pub fn write(&mut self, locus: &Locus, output_flank_len: usize, results: &LocusResult) {
+    pub fn write(&mut self, locus: &Locus, results: &LocusResult) {
         let num_reads = results.reads.len();
         for index in 0..num_reads {
             let read = &results.reads[index];
             let classification = results.classification[index];
             let span = &results.tr_spans[index];
 
-            if span.0 < output_flank_len || read.bases.len() < span.1 + output_flank_len {
+            if span.0 < self.output_flank_len || read.bases.len() < span.1 + self.output_flank_len {
                 log::error!("Read {} has unexpectedly short flanks", read.id);
                 continue;
             }
 
-            let left_clip_len = span.0 - output_flank_len;
-            let right_clip_len = read.bases.len() - span.1 - output_flank_len;
+            let left_clip_len = span.0 - self.output_flank_len;
+            let right_clip_len = read.bases.len() - span.1 - self.output_flank_len;
             let clipped_read = clip_bases(read, left_clip_len, right_clip_len);
             if clipped_read.is_none() {
                 log::error!("Read {} has unexpectedly short flanks", read.id);
@@ -71,7 +79,7 @@ impl BamWriter {
                     &read.bases,
                     quals.as_bytes(),
                 );
-                rec.set_mapq(60);
+                rec.set_mapq(read.mapq);
             } else {
                 rec.set(read.id.as_bytes(), None, &read.bases, quals.as_bytes());
                 rec.set_pos(locus.region.start as i64);
@@ -91,11 +99,16 @@ impl BamWriter {
                 rec.push_aux(b"MO", mm_tag).unwrap();
             }
 
+            if let Some(hp) = read.hp_tag {
+                let hp_tag = Aux::U8(hp);
+                rec.push_aux(b"HP", hp_tag).unwrap();
+            }
+
             rec.push_aux(b"SO", Aux::I32(read.start_offset)).unwrap();
             rec.push_aux(b"EO", Aux::I32(read.end_offset)).unwrap();
             rec.push_aux(b"AL", Aux::I32(classification)).unwrap();
 
-            let dat: &Vec<u32> = &vec![output_flank_len as u32, output_flank_len as u32];
+            let dat: &Vec<u32> = &vec![self.output_flank_len as u32, self.output_flank_len as u32];
             let fl_tag: AuxArray<u32> = dat.into();
             rec.push_aux(b"FL", Aux::ArrayU32(fl_tag)).unwrap();
 

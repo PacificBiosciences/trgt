@@ -1,7 +1,6 @@
 use crate::locus::Locus;
 use crate::workflows::{Genotype, LocusResult};
 use itertools::Itertools;
-use log::error;
 use rust_htslib::bam::{self};
 use rust_htslib::bcf::record::GenotypeAllele;
 use rust_htslib::bcf::{self, Format, Record};
@@ -60,13 +59,9 @@ impl VcfWriter {
 
         vcf_header.push_sample(sample_name.as_bytes());
 
-        let writer = match bcf::Writer::from_path(output_path, &vcf_header, false, Format::Vcf) {
-            Ok(file) => file,
-            Err(_) => {
-                error!("Invalid VCF output path: {}", &output_path);
-                std::process::exit(1);
-            }
-        };
+        let writer = bcf::Writer::from_path(output_path, &vcf_header, false, Format::Vcf)
+            .map_err(|_| format!("Invalid VCF output path: {}", output_path))?;
+
         Ok(VcfWriter { writer })
     }
 

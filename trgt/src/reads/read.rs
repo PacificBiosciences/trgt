@@ -1,10 +1,8 @@
-use super::cigar::Cigar;
+use super::{cigar::Cigar, meth, snp::extract_snps_offset};
 use crate::utils::GenomicRegion;
 use itertools::Itertools;
 use rust_htslib::bam::{self, ext::BamRecordExtensions, record::Aux};
 use std::str;
-
-use super::meth;
 
 #[derive(Debug)]
 pub struct MethInfo {
@@ -22,6 +20,8 @@ pub struct HiFiRead {
     pub start_offset: i32,
     pub end_offset: i32,
     pub cigar: Option<Cigar>,
+    pub hp_tag: Option<u8>,
+    pub mapq: u8,
 }
 
 impl std::fmt::Debug for HiFiRead {
@@ -45,48 +45,47 @@ impl HiFiRead {
         let id = str::from_utf8(rec.qname()).unwrap().to_string();
         let bases = rec.seq().as_bytes();
 
-        let mm_tag = get_mm_tag(&rec);
-        let ml_tag = get_ml_tag(&rec);
+        let meth = get_mm_tag(&rec).and_then(|mm_tag| {
+            get_ml_tag(&rec)
+                .and_then(|ml_tag| parse_meth_tags(mm_tag, ml_tag))
+                .and_then(|tags| {
+                    if rec.is_reverse() {
+                        meth::decode_on_minus(&bases, &tags)
+                    } else {
+                        meth::decode_on_plus(&bases, &tags)
+                    }
+                })
+        });
 
-        let meth = match mm_tag {
-            Some(mm_tag) => parse_meth_tags(mm_tag, ml_tag.unwrap()),
-            None => None,
-        };
-
-        let meth = match meth {
-            Some(tags) => {
-                if rec.is_reverse() {
-                    meth::decode_on_minus(&bases, &tags)
-                } else {
-                    meth::decode_on_plus(&bases, &tags)
-                }
-            }
-            None => None,
-        };
-
+        let mapq = rec.mapq();
+        let hp_tag = get_hp_tag(&rec);
         let read_qual = get_rq_tag(&rec);
 
-        let cigar = if rec.is_unmapped() {
-            None
+        let cigar = if !rec.is_unmapped() {
+            Some(Cigar {
+                ref_pos: rec.reference_start(),
+                ops: rec.cigar().take().to_vec(),
+            })
         } else {
-            let ref_pos = rec.reference_start();
-            let ops = rec.cigar().take().to_vec();
-            let cigar = Cigar { ref_pos, ops };
-            Some(cigar)
+            None
         };
 
         let start_offset = (rec.reference_start() - region.start as i64) as i32;
         let end_offset = (rec.reference_end() - region.end as i64) as i32;
+
+        let mismatch_offsets = cigar.as_ref().map(|c| extract_snps_offset(c, region));
 
         HiFiRead {
             id,
             bases,
             meth,
             read_qual,
-            mismatch_offsets: None,
+            mismatch_offsets,
             start_offset,
             end_offset,
             cigar,
+            hp_tag,
+            mapq,
         }
     }
 }
@@ -125,35 +124,23 @@ fn parse_meth_tags(mm_tag: Aux, ml_tag: Aux) -> Option<MethInfo> {
 }
 
 fn get_mm_tag(rec: &bam::Record) -> Option<Aux> {
-    if let Ok(value) = rec.aux(b"MM") {
-        Some(value)
-    } else if let Ok(value) = rec.aux(b"Mm") {
-        Some(value)
-    } else {
-        None
-    }
+    rec.aux(b"MM").or_else(|_| rec.aux(b"Mm")).ok()
 }
 
 fn get_ml_tag(rec: &bam::Record) -> Option<Aux> {
-    if let Ok(value) = rec.aux(b"ML") {
-        Some(value)
-    } else if let Ok(value) = rec.aux(b"Ml") {
-        Some(value)
-    } else {
-        None
-    }
+    rec.aux(b"ML").or_else(|_| rec.aux(b"Ml")).ok()
 }
 
 fn get_rq_tag(rec: &bam::Record) -> Option<f64> {
-    let rq_tag = rec.aux(b"rq");
-    if rq_tag.is_err() {
-        return None;
+    match rec.aux(b"rq") {
+        Ok(Aux::Float(value)) => Some(f64::from(value)),
+        _ => None,
     }
+}
 
-    let rq_tag = rq_tag.unwrap();
-    if let Aux::Float(value) = rq_tag {
-        return Some(value as f64);
+fn get_hp_tag(rec: &bam::Record) -> Option<u8> {
+    match rec.aux(b"HP") {
+        Ok(Aux::U8(value)) => Some(u8::from(value)),
+        _ => None,
     }
-
-    panic!("Unexpected rq tag format: {:?}", rq_tag);
 }
