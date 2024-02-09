@@ -1,4 +1,4 @@
-use crate::{label::Annotation, reads::HiFiRead};
+use crate::{hmm::Annotation, reads::HiFiRead};
 use arrayvec::ArrayVec;
 
 #[derive(Debug)]

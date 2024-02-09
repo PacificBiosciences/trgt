@@ -1,6 +1,8 @@
 use crate::cluster;
 use crate::genotype::{self, flank_genotype, Gt};
-use crate::label::label_alleles;
+use crate::hmm::{
+    build_hmm, calc_purity, collapse_labels, count_motifs, replace_invalid_bases, Annotation,
+};
 use crate::locate::{find_tr_spans, TrgtScoring};
 use crate::locus::{Genotyper, Locus};
 use crate::reads::{clip_to_region, HiFiRead};
@@ -35,7 +37,7 @@ pub fn analyze(
     )?;
     log::debug!("{}: Collected {} reads", locus.id, reads.len());
 
-    let clip_radius = 500;
+    let clip_radius = 2 * params.search_flank_len;
     let reads = clip_reads(locus, clip_radius, reads);
     log::debug!("{}: {} reads left after clipping", locus.id, reads.len());
 
@@ -54,7 +56,7 @@ pub fn analyze(
         Genotyper::Size => genotype::genotype(locus.ploidy, &trs),
         Genotyper::Cluster => {
             let spanning = reads.iter().map(|r| &r.bases[..]).collect_vec();
-            cluster::genotype(&spanning, &trs)
+            cluster::genotype(locus.ploidy, &spanning, &trs)
         }
     };
 
@@ -66,7 +68,7 @@ pub fn analyze(
         }
     }
 
-    let annotations = label_alleles(locus, &allele_seqs);
+    let annotations = label_with_hmm(locus, &allele_seqs);
 
     let spanning_by_hap = [
         classification.iter().filter(|&x| *x == 0).count(),
@@ -337,4 +339,43 @@ fn get_tr_meth(read: &HiFiRead, span: &(usize, usize)) -> Option<f64> {
     } else {
         None
     }
+}
+
+fn label_with_hmm(locus: &Locus, seqs: &Vec<String>) -> Vec<Annotation> {
+    let motifs = locus
+        .motifs
+        .iter()
+        .map(|m| replace_invalid_bases(m))
+        .map(|m| m.as_bytes().to_vec())
+        .collect_vec();
+    let hmm = build_hmm(&motifs);
+
+    let mut annotations = Vec::new();
+    for seq in seqs {
+        let seq = replace_invalid_bases(seq);
+        let labels = hmm.label(&seq);
+        let purity = calc_purity(&seq.as_bytes(), &hmm, &motifs, &labels);
+        let labels = hmm.label_motifs(&labels);
+        // Remove labels corresponding to the skip state
+        let labels = labels
+            .into_iter()
+            .filter(|rec| rec.motif_index < motifs.len())
+            .collect_vec();
+        let motif_counts = count_motifs(&locus.motifs, &labels);
+        let labels = collapse_labels(labels);
+        // TODO: Consider using empty labels instead of Nones
+        let labels = if !labels.is_empty() {
+            Some(labels)
+        } else {
+            None
+        };
+
+        annotations.push(Annotation {
+            labels,
+            motif_counts,
+            purity,
+        });
+    }
+
+    annotations
 }

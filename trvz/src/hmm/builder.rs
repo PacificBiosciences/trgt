@@ -1,81 +1,5 @@
 use super::hmm::{Hmm, HmmMotif};
-use super::spans::Span;
-use super::Annotation;
-use crate::cli::handle_error_and_exit;
-use crate::locus::Locus;
 use itertools::Itertools;
-
-pub fn label_with_hmm(locus: &Locus, seqs: &Vec<String>) -> Vec<Annotation> {
-    let motifs = locus
-        .motifs
-        .iter()
-        .map(|m| m.as_bytes().to_vec())
-        .collect_vec();
-    let hmm = build_hmm(&motifs);
-
-    let mut annotations = Vec::new();
-    for seq in seqs {
-        let seq: String = seq
-            .as_bytes()
-            .iter()
-            .enumerate()
-            .map(|(i, b)| match b {
-                b'A' | b'T' | b'C' | b'G' => *b as char,
-                _ => ['A', 'T', 'C', 'G'][i % 4],
-            })
-            .collect();
-        let labels = hmm.label(&seq);
-        let purity = calc_purity(&seq.as_bytes(), &hmm, &motifs, &labels);
-        let labels = hmm.label_motifs(&labels);
-        // Remove labels corresponding to the skip state
-        let labels = labels
-            .into_iter()
-            .filter(|rec| rec.motif_index < motifs.len())
-            .collect_vec();
-        let motif_counts = count_motifs(&locus.motifs, &labels);
-        let labels = collapse_labels(labels);
-        // TODO: Consider using empty labels instead of None
-        let labels = if !labels.is_empty() {
-            Some(labels)
-        } else {
-            None
-        };
-
-        annotations.push(Annotation {
-            labels,
-            motif_counts,
-            purity,
-        });
-    }
-
-    annotations
-}
-
-fn collapse_labels(spans: Vec<Span>) -> Vec<Span> {
-    let mut collapsed = Vec::new();
-    for span in spans {
-        if collapsed.is_empty() {
-            collapsed.push(span);
-            continue;
-        }
-
-        let last_span = collapsed.last_mut().unwrap();
-        if last_span.motif_index == span.motif_index && last_span.end == span.start {
-            last_span.end = span.end;
-        } else {
-            collapsed.push(span);
-        }
-    }
-    collapsed
-}
-
-fn count_motifs(motifs: &Vec<String>, labels: &Vec<Span>) -> Vec<usize> {
-    let mut motif_counts = vec![0; motifs.len()];
-    for span in labels {
-        motif_counts[span.motif_index] += 1;
-    }
-    motif_counts
-}
 
 pub fn build_hmm(motifs: &[Vec<u8>]) -> Hmm {
     // 2 terminal states + 2 run start states + 3 states of the skip block + (4n - 1) states for each motif of length n
@@ -196,7 +120,7 @@ fn define_motif_block(hmm: &mut Hmm, ms: usize, motif: &Vec<u8>) {
         }
     }
 
-    // Define insersion states
+    // Define insertion states
     for (ins_index, ins_state) in ins_states.iter().enumerate() {
         hmm.set_ems(*ins_state, vec![0.00, 0.25, 0.25, 0.25, 0.25]);
         let match_state = match_states[ins_index];
@@ -255,115 +179,13 @@ fn get_match_emissions(char: u8) -> Vec<f64> {
         b'T' => vec![0.00, 0.03, 0.90, 0.03, 0.03],
         b'C' => vec![0.00, 0.03, 0.03, 0.90, 0.03],
         b'G' => vec![0.00, 0.03, 0.03, 0.03, 0.90],
-        _ => panic!("Enountered unknown base {char}"),
+        _ => panic!("Encountered unknown base {char}"),
     }
-}
-
-#[derive(Debug, PartialEq)]
-pub enum HmmEvent {
-    Match,
-    Mismatch,
-    Ins,
-    Del,
-    Trans, // Silent states that don't encode alignment operation
-    Skip,  // Skip state that matches bases outside of any motif run
-}
-
-pub fn get_events(hmm: &Hmm, motifs: &[Vec<u8>], states: &[usize], query: &[u8]) -> Vec<HmmEvent> {
-    let mut state_to_hmm_motif = vec![-1; hmm.num_states];
-    for hmm_motif in &hmm.motifs {
-        // Skip two terminal states MS and ME
-        for state in hmm_motif.start_state + 1..hmm_motif.end_state {
-            state_to_hmm_motif[state] = hmm_motif.motif_index as i32;
-        }
-    }
-
-    let mut base_index = 0;
-    let mut events = Vec::new();
-    let base_consumers = [
-        HmmEvent::Match,
-        HmmEvent::Mismatch,
-        HmmEvent::Ins,
-        HmmEvent::Skip,
-    ];
-    for state in states {
-        let motif_index = state_to_hmm_motif[*state];
-        let event = if motif_index == -1 {
-            HmmEvent::Trans
-        } else if motif_index as usize + 1 == hmm.motifs.len() {
-            HmmEvent::Skip
-        } else {
-            let motif = &hmm.motifs[motif_index as usize];
-            let offset = state - motif.start_state - 1;
-            let motif_len = motifs[motif.motif_index].len();
-            match offset.div_euclid(motif_len) {
-                0 => {
-                    let base = query[base_index];
-                    if base == get_base_match(&hmm, *state) {
-                        HmmEvent::Match
-                    } else {
-                        HmmEvent::Mismatch
-                    }
-                }
-                1 => HmmEvent::Ins,
-                2 => HmmEvent::Del,
-                _ => handle_error_and_exit(format!("Event decoding error")),
-            }
-        };
-
-        if base_consumers.contains(&event) {
-            base_index += 1;
-        }
-        events.push(event);
-    }
-
-    events
-}
-
-fn get_base_match(hmm: &Hmm, state: usize) -> u8 {
-    let ems = &hmm.ems[state];
-    assert_eq!(ems.len(), 5);
-
-    if !hmm.emits_base(state) {
-        return b' ';
-    }
-
-    let max_lp = *ems.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
-    let top_indexes = ems
-        .iter()
-        .enumerate()
-        .filter(|(_i, p)| **p == max_lp)
-        .map(|(i, _p)| i)
-        .collect_vec();
-    if top_indexes.len() == 1 {
-        match top_indexes[0] {
-            0 => b'#',
-            1 => b'A',
-            2 => b'T',
-            3 => b'C',
-            4 => b'G',
-            _ => handle_error_and_exit(format!("Unexpected base match event")),
-        }
-    } else {
-        b' '
-    }
-}
-
-fn calc_purity(query: &[u8], hmm: &Hmm, motifs: &[Vec<u8>], states: &[usize]) -> f64 {
-    let events = get_events(hmm, motifs, states, query);
-    let num_matches = events
-        .iter()
-        .map(|e| match *e {
-            HmmEvent::Del | HmmEvent::Ins | HmmEvent::Mismatch | HmmEvent::Skip => -1,
-            HmmEvent::Match => 1,
-            HmmEvent::Trans => 0,
-        })
-        .sum::<i32>();
-    num_matches as f64 / query.len() as f64
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::Span;
     use super::*;
 
     fn summarize(spans: &Vec<Span>) -> Vec<(usize, usize, usize)> {
@@ -430,52 +252,5 @@ mod tests {
         ];
 
         assert_eq!(summarize(&labels), expected);
-    }
-
-    #[test]
-    fn states_match_the_most_likely_base() {
-        let motifs = vec!["A".as_bytes().to_vec()];
-        let hmm = build_hmm(&motifs);
-        assert_eq!(get_base_match(&hmm, 3), b'A');
-    }
-
-    #[test]
-    fn silent_states_match_a_blank_character() {
-        let mut hmm = Hmm::new(3);
-        hmm.set_ems(0, vec![1.00, 0.00, 0.00, 0.00, 0.00]); // Start state
-        hmm.set_ems(1, vec![0.00, 0.50, 0.50, 0.00, 0.00]); // State with identical scores for 'A' and 'T'
-        hmm.set_ems(2, vec![1.00, 0.00, 0.00, 0.00, 0.00]); // End state
-        assert_eq!(get_base_match(&hmm, 1), b' ',);
-    }
-
-    #[test]
-    fn calculate_purity_of_perfect_repeats() {
-        let motifs = vec!["CAG".as_bytes().to_vec(), "CCG".as_bytes().to_vec()];
-        let hmm = build_hmm(&motifs);
-        let query = "CAGCAGCAGCCGCCGCCGCCG";
-        let states = hmm.label(&query);
-        assert_eq!(calc_purity(&query.as_bytes(), &hmm, &motifs, &states), 1.0);
-    }
-
-    #[test]
-    fn calculate_purity_of_imperfect_repeats() {
-        let motifs = vec!["CAG".as_bytes().to_vec(), "CCG".as_bytes().to_vec()];
-        let hmm = build_hmm(&motifs);
-        let query = "CAGCGCAGCCGCCGCCGGG";
-        let states = hmm.label(&query);
-
-        let purity = calc_purity(&query.as_bytes(), &hmm, &motifs, &states);
-        assert_eq!(purity, 16.0 / 19.0);
-    }
-
-    #[test]
-    fn calculate_purity_of_repeats_with_skip_states() {
-        let motifs = vec!["CAG".as_bytes().to_vec(), "CCG".as_bytes().to_vec()];
-        let hmm = build_hmm(&motifs);
-        let query = "CAGCAGCAGTTTTTTTTCCGCCGCCG";
-        let states = hmm.label(&query);
-
-        let purity = calc_purity(&query.as_bytes(), &hmm, &motifs, &states);
-        assert_eq!(purity, 10.0 / 26.0);
     }
 }

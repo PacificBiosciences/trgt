@@ -1,5 +1,5 @@
 use crate::cluster::consensus;
-use crate::cluster::math::median;
+use crate::genotype::Ploidy;
 use crate::genotype::{Gt, TrSize};
 use arrayvec::ArrayVec;
 use bio::alignment::distance::simd::bounded_levenshtein;
@@ -52,48 +52,78 @@ pub fn make_consensus(
     (allele, size)
 }
 
-pub fn genotype(seqs: &Vec<&[u8]>, trs: &[&str]) -> (Gt, Vec<String>, Vec<i32>) {
+pub fn genotype(ploidy: Ploidy, seqs: &Vec<&[u8]>, trs: &[&str]) -> (Gt, Vec<String>, Vec<i32>) {
     let mut dists = get_dist_matrix(seqs);
-    let mut groups = cluster(seqs.len(), &mut dists);
+    let num_seqs = seqs.len();
+    if ploidy == Ploidy::One {
+        let group: Vec<usize> = (0..num_seqs).collect();
+        let (allele, size) = make_consensus(num_seqs, trs, &dists, &group);
+        let mut gt = Gt::new();
+        gt.push(size);
+        let classifications = vec![0; num_seqs];
+        return (gt, vec![allele], classifications);
+    }
+    let mut groups = cluster(num_seqs, &mut dists);
+
+    assert!(groups.len() >= 2);
     groups.sort_by_key(|a| a.len());
 
     let group1 = groups.pop().unwrap();
-    let (allele1, size1) = make_consensus(seqs.len(), trs, &dists, &group1);
+    let group2 = groups.pop().unwrap();
 
-    let group2 = groups.pop().unwrap_or_default();
+    let (allele1, size1) = make_consensus(num_seqs, trs, &dists, &group1);
+    let (allele2, size2) = make_consensus(num_seqs, trs, &dists, &group2);
 
-    const MAX_GROUP_RATIO: usize = 10;
-    let is_homozygous = group2.is_empty() || group2.len() * MAX_GROUP_RATIO <= group1.len() || {
-        // reject group2 if estimated consensus size difference is negligible
-        // and group 1 has significantly more reads.
-        let group1_len =
-            median(&group1.iter().map(|&i| trs[i].len() as i32).collect_vec()).unwrap();
-        let group2_len =
-            median(&group2.iter().map(|&i| trs[i].len() as i32).collect_vec()).unwrap();
-        let delta = (group1_len - group2_len).abs();
-        let group1_frac = group1.len() as f64 / (group1.len() as f64 + group2.len() as f64);
+    // GS: this should be handled better, but for now we just check for small
+    // differences in size and large differences in cov
+    fn small_group_is_outlier(len1: usize, len2: usize, cov1: usize, cov2: usize) -> bool {
+        const MIN_LEN_DIFF: usize = 100;
+        const MIN_COV_RATIO: usize = 4;
 
-        const MIN_GROUP_SIZE_DIFF: f32 = 100.0;
-        const MAX_SIMILAR_GROUP_FRAC: f64 = 0.80;
-        delta <= MIN_GROUP_SIZE_DIFF && group1_frac >= MAX_SIMILAR_GROUP_FRAC
-    };
+        let min_cov = std::cmp::min(cov1, cov2);
+        let max_cov = std::cmp::max(cov1, cov2);
+        return len1.abs_diff(len2) < MIN_LEN_DIFF && min_cov * MIN_COV_RATIO < max_cov;
+    }
+    if small_group_is_outlier(allele1.len(), allele2.len(), group1.len(), group2.len()) {
+        // redo the homozygous case
+        let group1: Vec<usize> = (0..num_seqs).step_by(2).collect();
+        let group2: Vec<usize> = (1..num_seqs).step_by(2).collect();
+        let (allele1, size1) = make_consensus(num_seqs, trs, &dists, &group1);
+        let (allele2, size2) = make_consensus(num_seqs, trs, &dists, &group2);
+        let mut classifications: Vec<i32> = (0..num_seqs).map(|x| (x % 2) as i32).collect();
+        let (gt, alleles) = if allele1.len() > allele2.len() {
+            classifications = classifications.iter().map(|x| 1 - x).collect();
+            (ArrayVec::from([size2, size1]), vec![allele2, allele1])
+        } else {
+            (ArrayVec::from([size1, size2]), vec![allele1, allele2])
+        };
 
-    if is_homozygous {
-        let gt = ArrayVec::from([size1.clone(), size1]);
-        let alleles = vec![allele1.clone(), allele1];
-
-        // distribute reads across alleles "randomly"
-        let classification = (0..seqs.len() as i32).map(|x| x % 2).collect::<Vec<i32>>();
-        return (gt, alleles, classification);
+        return (gt, alleles, classifications);
     }
 
-    let (allele2, size2) = make_consensus(seqs.len(), trs, &dists, &group2);
-    let mut classifications = vec![2; seqs.len()];
+    let mut classifications = vec![2; num_seqs];
     for seq_index in group1 {
         classifications[seq_index] = 0;
     }
     for seq_index in group2 {
         classifications[seq_index] = 1;
+    }
+
+    // assign outlier reads (discarded in cluster()) to the closest consensus
+    for i in 0..num_seqs {
+        let mut tie_breaker = 1;
+        if classifications[i] == 2 {
+            let dist1 = get_dist(trs[i].as_bytes(), allele1.as_bytes());
+            let dist2 = get_dist(trs[i].as_bytes(), allele2.as_bytes());
+            if dist1 < dist2 {
+                classifications[i] = 0;
+            } else if dist2 < dist1 {
+                classifications[i] = 1;
+            } else {
+                tie_breaker = (tie_breaker + 1) % 2;
+                classifications[i] = tie_breaker;
+            }
+        }
     }
 
     let (gt, alleles) = if allele1.len() > allele2.len() {
@@ -102,6 +132,7 @@ pub fn genotype(seqs: &Vec<&[u8]>, trs: &[&str]) -> (Gt, Vec<String>, Vec<i32>) 
     } else {
         (ArrayVec::from([size1, size2]), vec![allele1, allele2])
     };
+
     (gt, alleles, classifications)
 }
 
@@ -121,15 +152,43 @@ pub fn cluster(num_seqs: usize, dists: &mut Vec<f64>) -> Vec<Vec<usize>> {
 
     let dendrogram = linkage(dists, num_seqs, Method::Ward);
 
-    // last element is the last merge, which is the highest dissimilarity
-    let cutoff = dendrogram.steps().last().unwrap().dissimilarity;
-    let cutoff = cutoff * 0.7;
+    let steps = dendrogram.steps();
+    let mut cutoff = 0.0;
+
+    // for low-coverage: at least 10% of the reads must be on the smaller allele
+    const MIN_SMALLER_FRAC: f64 = 0.1;
+
+    // for high-coverage: at least 10 reads must be on the smaller allele
+    const MIN_CLUSTER_SIZE: usize = 10;
+
+    // choose whichever is most liberal
+    let min_cluster_size = std::cmp::min(
+        MIN_CLUSTER_SIZE,
+        (MIN_SMALLER_FRAC * (num_seqs as f64)).round() as usize,
+    );
+    for step in steps.iter().rev() {
+        let size1 = dendrogram.cluster_size(step.cluster1);
+        let size2 = dendrogram.cluster_size(step.cluster2);
+        let min_size = std::cmp::min(size1, size2);
+        if min_size >= min_cluster_size {
+            cutoff = step.dissimilarity - 0.0001;
+            break;
+        }
+    }
+
+    // homozygous: split reads across alleles equally
+    if cutoff == 0.0 {
+        return vec![
+            (0..num_seqs).step_by(2).collect(),
+            (1..num_seqs).step_by(2).collect(),
+        ];
+    }
 
     let mut num_groups = 0;
     let num_nodes = 2 * num_seqs - 1;
     let mut membership = vec![None; num_nodes];
 
-    for (cluster_index, step) in dendrogram.steps().iter().enumerate().rev() {
+    for (cluster_index, step) in steps.iter().enumerate().rev() {
         let cluster = cluster_index + num_seqs;
         if step.dissimilarity <= cutoff {
             if membership[cluster].is_none() {
@@ -166,23 +225,27 @@ fn get_ci(seqs: &[&str]) -> (usize, usize) {
     (min_val, max_val)
 }
 
-fn get_dist_matrix(seqs: &Vec<&[u8]>) -> Vec<f64> {
+fn get_dist(seq1: &[u8], seq2: &[u8]) -> f64 {
+    // we'll skip ED in cases we already know it will be too costly to do so.
+    const MAX_K: u32 = 2000;
+
+    let seq_diff = seq1.len().abs_diff(seq2.len()) as u32;
+    let dist = if seq_diff <= MAX_K {
+        bounded_levenshtein(seq1, seq2, MAX_K).unwrap_or(MAX_K)
+    } else {
+        seq_diff // lower bound on ED
+    };
+
+    (dist as f64).sqrt()
+}
+
+fn get_dist_matrix(seqs: &[&[u8]]) -> Vec<f64> {
     let dist_len = seqs.len() * (seqs.len() - 1) / 2;
     let mut dists = Vec::with_capacity(dist_len);
     for (index1, seq1) in seqs.iter().enumerate() {
         for (_index2, seq2) in seqs.iter().enumerate().skip(index1 + 1) {
-            let max_len = std::cmp::max(seq1.len(), seq2.len()) as u32;
-            let min_len = std::cmp::min(seq1.len(), seq2.len()) as u32;
-            let length_diff = max_len - min_len;
-
-            // we'll skip ED in cases we already know it will be too costly to do so.
-            const MAX_K: u32 = 500;
-            let dist = if length_diff <= MAX_K {
-                bounded_levenshtein(seq1, seq2, MAX_K).unwrap_or(MAX_K)
-            } else {
-                length_diff // lower bound on ED
-            };
-            dists.push(dist as f64);
+            let dist = get_dist(seq1, seq2);
+            dists.push(dist);
         }
     }
     assert_eq!(dists.len(), dist_len);

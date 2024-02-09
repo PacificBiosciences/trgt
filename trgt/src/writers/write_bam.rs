@@ -65,23 +65,20 @@ impl BamWriter {
 
             let contig = locus.region.contig.as_bytes();
             let contig_id = self.writer.header().tid(contig).unwrap();
-            let quals = "(".repeat(read.bases.len());
 
             let mut rec = bam::Record::new();
             rec.set_tid(contig_id as i32);
+            if read.is_reverse {
+                rec.set_reverse();
+            }
 
             if let Some(cigar) = read.cigar {
                 rec.set_pos(cigar.ref_pos);
                 let cigar = CigarString(cigar.ops);
-                rec.set(
-                    read.id.as_bytes(),
-                    Some(&cigar),
-                    &read.bases,
-                    quals.as_bytes(),
-                );
+                rec.set(read.id.as_bytes(), Some(&cigar), &read.bases, &read.quals);
                 rec.set_mapq(read.mapq);
             } else {
-                rec.set(read.id.as_bytes(), None, &read.bases, quals.as_bytes());
+                rec.set(read.id.as_bytes(), None, &read.bases, &read.quals);
                 rec.set_pos(locus.region.start as i64);
                 rec.set_unmapped();
             }

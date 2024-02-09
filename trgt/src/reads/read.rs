@@ -13,7 +13,9 @@ pub struct MethInfo {
 #[derive(PartialEq, Clone)]
 pub struct HiFiRead {
     pub id: String,
+    pub is_reverse: bool,
     pub bases: Vec<u8>,
+    pub quals: Vec<u8>,
     pub meth: Option<Vec<u8>>,
     pub read_qual: Option<f64>,
     pub mismatch_offsets: Option<Vec<i32>>,
@@ -43,7 +45,9 @@ impl std::fmt::Debug for HiFiRead {
 impl HiFiRead {
     pub fn from_hts_rec(rec: bam::Record, region: &GenomicRegion) -> HiFiRead {
         let id = str::from_utf8(rec.qname()).unwrap().to_string();
+        let is_reverse = rec.is_reverse();
         let bases = rec.seq().as_bytes();
+        let quals = rec.qual().to_vec();
 
         let meth = get_mm_tag(&rec).and_then(|mm_tag| {
             get_ml_tag(&rec)
@@ -77,7 +81,9 @@ impl HiFiRead {
 
         HiFiRead {
             id,
+            is_reverse,
             bases,
+            quals,
             meth,
             read_qual,
             mismatch_offsets,
@@ -96,31 +102,33 @@ fn parse_meth_tags(mm_tag: Aux, ml_tag: Aux) -> Option<MethInfo> {
         _ => panic!("Unexpected MM tag format: {:?}", mm_tag),
     };
 
-    if mm_tag.is_empty() || mm_tag.len() <= 5 {
+    let mm_tag = mm_tag
+        .strip_prefix("C+m?")
+        .or_else(|| mm_tag.strip_prefix("C+m"))?;
+    let mm_tag = mm_tag.trim_matches(',');
+
+    let first_mm_rec = mm_tag.split(";").next()?;
+    if first_mm_rec.is_empty() {
         return None;
     }
-
-    let mm_tag = if mm_tag.contains('?') {
-        &mm_tag[5..mm_tag.len() - 1]
-    } else {
-        &mm_tag[4..mm_tag.len() - 1]
-    };
-    let mm_tag = mm_tag
+    let poses = first_mm_rec
         .split(',')
         .map(|n| n.parse::<usize>().unwrap())
         .collect::<Vec<_>>();
 
-    let ml_tag = match ml_tag {
+    let mut probs = match ml_tag {
         Aux::ArrayU8(tag) => tag.iter().collect::<Vec<_>>(),
         _ => panic!("Unexpected ML tag format: {:?}", ml_tag),
     };
 
-    assert_eq!(mm_tag.len(), ml_tag.len());
+    // If MM tag contains a semicolon, it must be composite
+    if mm_tag.contains(';') {
+        probs = probs[..poses.len()].to_vec();
+    }
 
-    Some(MethInfo {
-        poses: mm_tag,
-        probs: ml_tag,
-    })
+    assert_eq!(poses.len(), probs.len());
+
+    Some(MethInfo { poses, probs })
 }
 
 fn get_mm_tag(rec: &bam::Record) -> Option<Aux> {

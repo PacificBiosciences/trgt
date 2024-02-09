@@ -7,12 +7,15 @@ pub fn clip_to_region(read: HiFiRead, region: (i64, i64)) -> Option<HiFiRead> {
     let (clipped_ref_start, clipped_query_start, clipped_cigar) = clip_cigar(cigar, region)?;
 
     let mut clipped_bases = Vec::new();
+    let mut clipped_quals = Vec::new();
     let mut query_pos = clipped_query_start;
 
     for op in &clipped_cigar {
         let op_query_len = get_query_len(op);
         clipped_bases
             .extend(&read.bases[query_pos as usize..query_pos as usize + op_query_len as usize]);
+        clipped_quals
+            .extend(&read.quals[query_pos as usize..query_pos as usize + op_query_len as usize]);
         query_pos += op_query_len;
     }
 
@@ -47,6 +50,7 @@ pub fn clip_to_region(read: HiFiRead, region: (i64, i64)) -> Option<HiFiRead> {
 
     Some(HiFiRead {
         bases: clipped_bases,
+        quals: clipped_quals,
         meth: clipped_meth,
         cigar: Some(cigar),
         ..read
@@ -177,7 +181,9 @@ mod tests {
     fn make_read(bases: &str, meths: Vec<u8>, cigar: Cigar) -> HiFiRead {
         HiFiRead {
             id: "read1".to_string(),
+            is_reverse: false,
             bases: bases.as_bytes().to_vec(),
+            quals: "(".repeat(bases.len()).as_bytes().to_vec(),
             meth: Some(meths),
             read_qual: None,
             mismatch_offsets: None,

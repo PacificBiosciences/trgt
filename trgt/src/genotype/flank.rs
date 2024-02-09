@@ -306,6 +306,7 @@ mod tests {
             .unwrap()
             + 1;
         let bases = encoding.as_bytes()[seq_start..seq_end].to_vec();
+        let quals = "(".repeat(bases.len()).as_bytes().to_vec();
         let mismatches = encoding
             .as_bytes()
             .iter()
@@ -324,7 +325,9 @@ mod tests {
 
         HiFiRead {
             id: "read".to_string(),
+            is_reverse: false,
             bases,
+            quals,
             meth: None,
             read_qual: None,
             mismatch_offsets: Some(mismatches),

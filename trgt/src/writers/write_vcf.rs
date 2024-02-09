@@ -13,7 +13,7 @@ pub struct VcfWriter {
 const VCF_LINES: [&str; 12] = [
     r#"##INFO=<ID=TRID,Number=1,Type=String,Description="Tandem repeat ID">"#,
     r#"##INFO=<ID=END,Number=1,Type=Integer,Description="End position of the variant described in this record">"#,
-    r#"##INFO=<ID=MOTIFS,Number=1,Type=String,Description="Motifs that the tandem repeat is composed of">"#,
+    r#"##INFO=<ID=MOTIFS,Number=.,Type=String,Description="Motifs that the tandem repeat is composed of">"#,
     r#"##INFO=<ID=STRUC,Number=1,Type=String,Description="Structure of the region">"#,
     r#"##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">"#,
     r#"##FORMAT=<ID=AL,Number=.,Type=Integer,Description="Length of each allele">"#,
@@ -150,7 +150,9 @@ impl VcfWriter {
             .unwrap();
 
         let data = encode_ap(&results.genotype);
-        record.push_format_float(b"AP", &data).unwrap();
+        record
+            .push_format_string(b"AP", &[data.as_bytes()])
+            .unwrap();
 
         let data = encode_am(&results.genotype);
         record
@@ -251,11 +253,17 @@ fn encode_ms(diplotype: &Genotype) -> String {
     encoding
 }
 
-fn encode_ap(genotype: &Genotype) -> Vec<f32> {
+fn encode_ap(genotype: &Genotype) -> String {
     genotype
         .iter()
-        .map(|a| a.annotation.purity as f32)
-        .collect_vec()
+        .map(|a| {
+            if a.annotation.purity.is_nan() {
+                ".".to_string()
+            } else {
+                format!("{:.6}", a.annotation.purity)
+            }
+        })
+        .join(",")
 }
 
 fn encode_allr(diplotype: &Genotype) -> String {

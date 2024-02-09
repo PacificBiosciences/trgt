@@ -10,6 +10,7 @@ pub fn clip_bases(read: &HiFiRead, left_len: usize, right_len: usize) -> Option<
     }
 
     let clipped_bases = read.bases[left_len..read.bases.len() - right_len].to_vec();
+    let clipped_quals = read.quals[left_len..read.quals.len() - right_len].to_vec();
 
     let clipped_cigar = if read.cigar.is_some() {
         clip_cigar(read.cigar.as_ref().unwrap().clone(), left_len, right_len)
@@ -42,6 +43,7 @@ pub fn clip_bases(read: &HiFiRead, left_len: usize, right_len: usize) -> Option<
 
     Some(HiFiRead {
         bases: clipped_bases,
+        quals: clipped_quals,
         meth: clipped_meth,
         cigar: clipped_cigar,
         id: read.id.clone(),
@@ -122,7 +124,9 @@ mod tests {
     fn make_read(bases: &str, meths: Vec<u8>, cigar: Cigar) -> HiFiRead {
         HiFiRead {
             id: "read".to_string(),
+            is_reverse: false,
             bases: bases.as_bytes().to_vec(),
+            quals: "(".repeat(bases.len()).as_bytes().to_vec(),
             meth: Some(meths),
             read_qual: None,
             mismatch_offsets: None,

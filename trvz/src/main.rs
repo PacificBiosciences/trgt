@@ -15,8 +15,6 @@ mod cli;
 mod genotype_plot;
 mod hmm;
 mod input;
-mod label_hmm;
-mod label_motifs;
 mod locus;
 mod pipe_plot;
 mod png;

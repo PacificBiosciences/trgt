@@ -115,6 +115,13 @@ pub struct CliParams {
     pub flank_len: usize,
 
     #[clap(help_heading("Advanced"))]
+    #[clap(long = "output-flank-len")]
+    #[clap(value_name = "FLANK_LEN")]
+    #[clap(help = "Length of flanking sequence to report on output")]
+    #[clap(default_value = "50")]
+    pub output_flank_len: usize,
+
+    #[clap(help_heading("Advanced"))]
     #[clap(long = "fixed-flanks")]
     #[clap(value_name = "FIXED_FLANKS")]
     #[clap(help = "Keep flank length fixed")]

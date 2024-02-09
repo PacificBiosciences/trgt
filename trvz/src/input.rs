@@ -1,6 +1,5 @@
-use crate::label_hmm::label_with_hmm;
-use crate::label_motifs::label_with_motifs;
-use crate::locus::{self, Allele, Locus};
+use crate::hmm::{build_hmm, get_events, Hmm, HmmEvent};
+use crate::locus::{self, Allele, BaseLabel, Locus};
 use crate::read::Read;
 use crate::struc::RegionLabel;
 use itertools::Itertools;
@@ -23,7 +22,6 @@ pub struct Span {
     pub start: usize,
     pub end: usize,
 }
-pub type Spans = Vec<Span>;
 
 pub fn get_genotype(bcf_path: &PathBuf, locus: &Locus) -> Result<Vec<Allele>, String> {
     let mut bcf = bcf::Reader::from_path(bcf_path).unwrap();
@@ -45,7 +43,7 @@ pub fn get_genotype(bcf_path: &PathBuf, locus: &Locus) -> Result<Vec<Allele>, St
         let allele_seqs = get_allele_seqs(locus, &record);
         let region_labels_by_allele = get_region_labels(locus, &allele_seqs, &record);
         let flank_labels_by_allele = get_flank_labels(locus, &region_labels_by_allele);
-        let base_labels_by_allele = get_base_labels(locus, &allele_seqs, &record);
+        let base_labels_by_allele = label_with_hmm(locus, &allele_seqs);
 
         let mut genotype = Vec::new();
         for (index, seq) in allele_seqs.into_iter().enumerate() {
@@ -249,36 +247,6 @@ fn get_region_labels(locus: &Locus, alleles: &[String], record: &Record) -> Vec<
     labels_by_hap
 }
 
-fn get_motif_spans(record: &Record) -> Vec<Option<Spans>> {
-    let mut spans_by_allele = Vec::new();
-    let ms_field = record.format(b"MS").string().unwrap();
-    let ms_field = str::from_utf8(ms_field.to_vec()[0]).unwrap();
-
-    for encoding in ms_field.split(',') {
-        let spans = match encoding {
-            "." => None,
-            _ => Some(
-                encoding
-                    .split('_')
-                    .map(|e| {
-                        let (index, start, end) = e
-                            .replace(')', "")
-                            .replace('(', "-")
-                            .split('-')
-                            .map(|n| n.parse::<usize>().unwrap())
-                            .collect_tuple()
-                            .unwrap();
-                        Span { index, start, end }
-                    })
-                    .collect_vec(),
-            ),
-        };
-        spans_by_allele.push(spans);
-    }
-
-    spans_by_allele
-}
-
 fn get_flank_labels(locus: &Locus, all_labels_by_allele: &Vec<RegionLabels>) -> Vec<RegionLabels> {
     let mut flank_labels_by_allele = Vec::new();
     for all_labels in all_labels_by_allele {
@@ -305,16 +273,53 @@ fn get_flank_labels(locus: &Locus, all_labels_by_allele: &Vec<RegionLabels>) -> 
     flank_labels_by_allele
 }
 
-fn get_base_labels(
-    locus: &Locus,
-    alleles: &Vec<String>,
-    record: &Record,
-) -> Vec<Vec<locus::BaseLabel>> {
-    let spans_by_allele = get_motif_spans(record);
+fn label_with_hmm(locus: &Locus, alleles: &Vec<String>) -> Vec<Vec<BaseLabel>> {
+    let motifs = locus
+        .motifs
+        .iter()
+        .map(|m| m.as_bytes().to_vec())
+        .collect_vec();
+    let hmm = build_hmm(&motifs);
 
-    if locus.struc.contains('<') {
-        label_with_hmm(locus, alleles)
-    } else {
-        label_with_motifs(locus, &spans_by_allele, alleles)
+    let mut labels_by_allele = Vec::new();
+
+    for allele in alleles {
+        let query = &allele[locus.left_flank.len()..allele.len() - locus.right_flank.len()];
+        let mut labels = vec![BaseLabel::Match; locus.left_flank.len()];
+        let states = hmm.label(query);
+        labels.extend(get_base_labels(
+            &locus.motifs,
+            &hmm,
+            &states,
+            query.as_bytes(),
+        ));
+        labels.extend(vec![BaseLabel::Match; locus.right_flank.len()]);
+        labels_by_allele.push(labels);
     }
+
+    labels_by_allele
+}
+
+fn get_base_labels(
+    motifs: &Vec<String>,
+    hmm: &Hmm,
+    states: &Vec<usize>,
+    query: &[u8],
+) -> Vec<BaseLabel> {
+    let motifs = motifs.iter().map(|m| m.as_bytes().to_vec()).collect_vec();
+    let events = get_events(hmm, &motifs, states, query);
+
+    let mut base_labels = Vec::new();
+    for event in events {
+        match event {
+            HmmEvent::Match | HmmEvent::Skip => base_labels.push(BaseLabel::Match),
+            HmmEvent::Ins => base_labels.push(BaseLabel::NoMatch),
+            HmmEvent::Del => base_labels.push(BaseLabel::Skip),
+            HmmEvent::Mismatch => base_labels.push(BaseLabel::Mismatch),
+            HmmEvent::MotifStart => base_labels.push(BaseLabel::MotifBound),
+            HmmEvent::Trans | HmmEvent::MotifEnd => {}
+        }
+    }
+    base_labels.push(BaseLabel::MotifBound);
+    base_labels
 }

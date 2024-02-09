@@ -36,8 +36,8 @@ mod cli;
 mod cluster;
 mod faidx;
 mod genotype;
+mod hmm;
 mod karyotype;
-mod label;
 mod locate;
 mod locus;
 mod reads;
@@ -186,7 +186,7 @@ fn run_trgt() -> Result<()> {
         VcfWriter::new(path, &sample_name, &bam_header)
     })?;
 
-    let output_flank_len = std::cmp::min(params.flank_len, 50);
+    let output_flank_len = std::cmp::min(params.flank_len, params.output_flank_len);
     let mut bam_writer = create_writer(&params.output_prefix, "spanning.bam", |path| {
         BamWriter::new(path, bam_header, output_flank_len)
     })?;

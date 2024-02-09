@@ -11,9 +11,8 @@ companion tool TRVZ for visualization of reads overlapping the repeats.
 
 ## Early version warning
 
-Please note that TRGT is still in early development. We are still tweaking the
-input / output file formats and making changes that can affect the behavior of
-the program.
+Please note that TRGT is still under active development. We anticipate some
+changes to the input and output file formats of both TRGT and TRVZ.
 
 ## Availability
 
@@ -63,13 +62,14 @@ instead. We make no warranty that any such issue will be addressed, to any
 extent or within any time frame.
 
 ## Citation
-If you use TRGT, please cite our pre-print:
+
+Please consider citing the paper describing TRGT:
 
 [Dolzhenko E, English A, Dashnow H, De Sena Brandine G, Mokveld T, Rowell WJ,
 Karniski C, Kronenberg Z, Danzi MC, Cheung W, Bi C, Farrow E, Wenger A,
 Martínez-Cerdeño V, Bartley TD, Jin P, Nelson D, Zuchner S, Pastinen T,
-Quinlan AR, Sedlazeck FJ, Eberle MA. Resolving the unsolved: Comprehensive
-assessment of tandem repeats at scale. bioRxiv. 2023](https://doi.org/10.1101/2023.05.12.540470)
+Quinlan AR, Sedlazeck FJ, Eberle MA. Characterization and visualization of
+tandem repeats at genome scale. 2024](https://www.nature.com/articles/s41587-023-02057-3)
 
 ## Full Changelog
 
@@ -96,15 +96,29 @@ assessment of tandem repeats at scale. bioRxiv. 2023](https://doi.org/10.1101/20
   - Users can now define complex repeats by specifying motif sequences in the MOTIFS field and setting STRUC to <`locus_name`>
   - The original MAPQ values in the input reads are now reported in the BAM output
   - BAMlet sample name can now be provided using the `--sample-name` flag; if it not provided, it is extracted from the input BAM or file stem (addressing issue #18)
+- 0.8.0
+  - **Breaking change**: Motif spans and counts (`MS` and `MC` fields) and purity assessment (`AP`
+    field) are now performed with an HMM-based algorithm for all repeats; expect
+    some differences in results relative to the previous versions
+  - Allele purity of zero-length alleles are now reported as missing values in
+    the VCFs
+  - The spanning.bam output file now carries over the QUAL values and mapping
+    strand from the input reads
+  - Added an advanced flag `--output-flank-len` that controls the number of
+    flanking bases reported in the spanning.bam files and shown in trvz plots
+  - A crash that may occur on BAMs where methylation was called twice has been
+    fixed
+  - Optimizations to the `--genotyper=cluster` mode, including haploid genotyping
+    of the X chromosome when `--karyotype` is set to `XY`
 
 ### DISCLAIMER
-THIS WEBSITE AND CONTENT AND ALL SITE-RELATED SERVICES, INCLUDING ANY DATA, ARE 
-PROVIDED "AS IS," WITH ALL FAULTS, WITH NO REPRESENTATIONS OR WARRANTIES OF ANY 
-KIND, EITHER EXPRESS OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, ANY WARRANTIES 
-OF MERCHANTABILITY, SATISFACTORY QUALITY, NON-INFRINGEMENT OR FITNESS FOR A 
+
+THIS WEBSITE AND CONTENT AND ALL SITE-RELATED SERVICES, INCLUDING ANY DATA, ARE
+PROVIDED "AS IS," WITH ALL FAULTS, WITH NO REPRESENTATIONS OR WARRANTIES OF ANY
+KIND, EITHER EXPRESS OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, ANY WARRANTIES
+OF MERCHANTABILITY, SATISFACTORY QUALITY, NON-INFRINGEMENT OR FITNESS FOR A
 PARTICULAR PURPOSE. YOU ASSUME TOTAL RESPONSIBILITY AND RISK FOR YOUR USE OF THIS
 SITE, ALL SITE-RELATED SERVICES, AND ANY THIRD PARTY WEBSITES OR APPLICATIONS. NO
-ORAL OR WRITTEN INFORMATION OR ADVICE SHALL CREATE A WARRANTY OF ANY KIND. ANY 
-REFERENCES TO SPECIFIC PRODUCTS OR SERVICES ON THE WEBSITES DO NOT CONSTITUTE OR 
+ORAL OR WRITTEN INFORMATION OR ADVICE SHALL CREATE A WARRANTY OF ANY KIND. ANY
+REFERENCES TO SPECIFIC PRODUCTS OR SERVICES ON THE WEBSITES DO NOT CONSTITUTE OR
 IMPLY A RECOMMENDATION OR ENDORSEMENT BY PACIFIC BIOSCIENCES.
-

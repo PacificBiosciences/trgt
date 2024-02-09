@@ -1,37 +1,5 @@
 use super::hmm::{Hmm, HmmMotif};
-use crate::locus::{BaseLabel, Locus};
 use itertools::Itertools;
-
-pub fn label_with_hmm(locus: &Locus, alleles: &Vec<String>) -> Vec<Vec<BaseLabel>> {
-    let motifs = locus
-        .motifs
-        .iter()
-        .map(|m| m.as_bytes().to_vec())
-        .collect_vec();
-    let hmm = build_hmm(&motifs);
-
-    let mut labels_by_allele = Vec::new();
-
-    for allele in alleles {
-        let query = &allele[locus.left_flank.len()..allele.len() - locus.right_flank.len()];
-        let mut labels = vec![BaseLabel::Match; locus.left_flank.len()];
-        let states = hmm.label(query);
-        labels.extend(get_base_labels(&hmm, &states));
-        labels.extend(vec![BaseLabel::Match; locus.right_flank.len()]);
-        labels_by_allele.push(labels);
-    }
-
-    labels_by_allele
-}
-
-fn get_base_labels(hmm: &Hmm, states: &Vec<usize>) -> Vec<BaseLabel> {
-    let mut base_labels = vec![BaseLabel::MotifBound];
-    for span in hmm.label_motifs(states) {
-        base_labels.extend(vec![BaseLabel::Match; span.end - span.start]);
-        base_labels.push(BaseLabel::MotifBound);
-    }
-    base_labels
-}
 
 pub fn build_hmm(motifs: &[Vec<u8>]) -> Hmm {
     // 2 terminal states + 2 run start states + 3 states of the skip block + (4n - 1) states for each motif of length n
@@ -152,7 +120,7 @@ fn define_motif_block(hmm: &mut Hmm, ms: usize, motif: &Vec<u8>) {
         }
     }
 
-    // Define insersion states
+    // Define insertion states
     for (ins_index, ins_state) in ins_states.iter().enumerate() {
         hmm.set_ems(*ins_state, vec![0.00, 0.25, 0.25, 0.25, 0.25]);
         let match_state = match_states[ins_index];
@@ -211,14 +179,14 @@ fn get_match_emissions(char: u8) -> Vec<f64> {
         b'T' => vec![0.00, 0.03, 0.90, 0.03, 0.03],
         b'C' => vec![0.00, 0.03, 0.03, 0.90, 0.03],
         b'G' => vec![0.00, 0.03, 0.03, 0.03, 0.90],
-        _ => panic!("Enountered unknown base {char}"),
+        _ => panic!("Encountered unknown base {char}"),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::Span;
     use super::*;
-    use crate::hmm::Span;
 
     fn summarize(spans: &Vec<Span>) -> Vec<(usize, usize, usize)> {
         let mut summary = Vec::new();

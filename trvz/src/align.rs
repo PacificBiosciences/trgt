@@ -19,12 +19,14 @@ pub fn align_reads(genotype: &Vec<Allele>, reads: Vec<Read>) -> Vec<AlignInfo> {
 
     for read in reads {
         let i = read.allele as usize;
-        align_infos.push(AlignInfo {
-            align: aligner.global(read.seq.as_bytes(), genotype[i].seq.as_bytes()),
-            seq: read.seq,
-            meth: read.meth,
-            allele_index: i,
-        });
+        if i < genotype.len() {
+            align_infos.push(AlignInfo {
+                align: aligner.global(read.seq.as_bytes(), genotype[i].seq.as_bytes()),
+                seq: read.seq,
+                meth: read.meth,
+                allele_index: i,
+            });
+        }
     }
 
     align_infos
