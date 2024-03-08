@@ -11,6 +11,9 @@
   unsorted VCF file (`<OUTPUT_PREFIX>.vcf.gz`) and unsorted BAM file with pieces
   of HiFi reads overlapping the repeats (`<OUTPUT_PREFIX>.spanning.bam`).
 - `--threads <THREADS>` Number of threads. Set to 1 by default.
+- `--karyotype <KARYOTYPE>` Sample karyotype (XX or XY). Set to XX by default.
+- `--sample-name <SAMPLE_NAME>` Sample name. If it is not provided, the sample name is extracted from the input BAM or file stem.
+- `--max-depth <MAX_DEPTH>` Maximum locus depth. Set to 250 by default.
 
 ## TRVZ command-line options
 

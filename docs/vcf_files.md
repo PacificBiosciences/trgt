@@ -39,7 +39,7 @@ the VCF file.
 |----------------|----------------------------------------------|---------------|
 | GT             | Genotype                                     | 1/2           |
 | AL             | Allele length in bps                         | 84,105        |
-| ALCI           | Confidence interval for HL                   | 80-85,102-114 |
+| ALLR           | Length range for AL                          | 80-85,102-114 |
 | SD             | Number of reads spanning each allele         | 28,18         |
 | MC             | Count of motifs of each TR on each allele    | 17_9,24_9     |
 | MS             | Span of each TR on each allele               | 0(0-51)_1(57-84),0(0-72)_1(78-105) |
