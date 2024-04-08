@@ -345,14 +345,14 @@ fn label_with_hmm(locus: &Locus, seqs: &Vec<String>) -> Vec<Annotation> {
     let motifs = locus
         .motifs
         .iter()
-        .map(|m| replace_invalid_bases(m))
+        .map(|m| replace_invalid_bases(m, &['A', 'T', 'C', 'G', 'N']))
         .map(|m| m.as_bytes().to_vec())
         .collect_vec();
     let hmm = build_hmm(&motifs);
 
     let mut annotations = Vec::new();
     for seq in seqs {
-        let seq = replace_invalid_bases(seq);
+        let seq = replace_invalid_bases(seq, &['A', 'T', 'C', 'G']);
         let labels = hmm.label(&seq);
         let purity = calc_purity(&seq.as_bytes(), &hmm, &motifs, &labels);
         let labels = hmm.label_motifs(&labels);

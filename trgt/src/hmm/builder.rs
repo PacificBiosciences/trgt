@@ -173,13 +173,14 @@ fn define_motif_block(hmm: &mut Hmm, ms: usize, motif: &Vec<u8>) {
     }
 }
 
-fn get_match_emissions(char: u8) -> Vec<f64> {
-    match char {
+fn get_match_emissions(base: u8) -> Vec<f64> {
+    match base {
         b'A' => vec![0.00, 0.90, 0.03, 0.03, 0.03],
         b'T' => vec![0.00, 0.03, 0.90, 0.03, 0.03],
         b'C' => vec![0.00, 0.03, 0.03, 0.90, 0.03],
         b'G' => vec![0.00, 0.03, 0.03, 0.03, 0.90],
-        _ => panic!("Encountered unknown base {char}"),
+        b'N' => vec![0.00, 0.25, 0.25, 0.25, 0.25],
+        _ => panic!("Encountered unknown base {}", base as char),
     }
 }
 

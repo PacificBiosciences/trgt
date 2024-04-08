@@ -179,7 +179,8 @@ fn get_match_emissions(char: u8) -> Vec<f64> {
         b'T' => vec![0.00, 0.03, 0.90, 0.03, 0.03],
         b'C' => vec![0.00, 0.03, 0.03, 0.90, 0.03],
         b'G' => vec![0.00, 0.03, 0.03, 0.03, 0.90],
-        _ => panic!("Encountered unknown base {char}"),
+        b'N' => vec![0.00, 0.25, 0.25, 0.25, 0.25],
+        _ => panic!("Encountered unknown base {}", char as char),
     }
 }
 

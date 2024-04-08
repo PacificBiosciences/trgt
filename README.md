@@ -110,6 +110,9 @@ tandem repeats at genome scale. 2024](https://www.nature.com/articles/s41587-023
     fixed
   - Optimizations to the `--genotyper=cluster` mode, including haploid genotyping
     of the X chromosome when `--karyotype` is set to `XY`
+- 0.9.0
+  - Add support for polyalanine repeats (by allowing characters `N` in the motif sequence)
+  - Fix a bug causing TRVZ to error out on polyalanine repeats
 
 ### DISCLAIMER
 

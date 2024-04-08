@@ -26,13 +26,17 @@ pub fn collapse_labels(spans: Vec<Span>) -> Vec<Span> {
     collapsed
 }
 
-pub fn replace_invalid_bases(seq: &str) -> String {
+pub fn replace_invalid_bases(seq: &str, allowed_bases: &[char]) -> String {
     seq.as_bytes()
         .iter()
         .enumerate()
-        .map(|(i, b)| match b {
-            b'A' | b'T' | b'C' | b'G' => *b as char,
-            _ => ['A', 'T', 'C', 'G'][i % 4],
+        .map(|(index, base)| {
+            let base = *base as char;
+            if allowed_bases.contains(&base) {
+                base
+            } else {
+                allowed_bases[index % allowed_bases.len()]
+            }
         })
         .collect()
 }

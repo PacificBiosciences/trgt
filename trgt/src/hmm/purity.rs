@@ -75,6 +75,17 @@ mod tests {
     }
 
     #[test]
+    fn calculate_purity_of_polyalanine_repeat() {
+        let motifs = vec!["GCN".as_bytes().to_vec()];
+        let hmm = build_hmm(&motifs);
+        //                 GCNGCNGCNGXN
+        let query = "GCAGCCGCTGAG";
+        let states = hmm.label(&query);
+        let purity = calc_purity(query.as_bytes(), &hmm, &motifs, &states);
+        assert_eq!(purity, 11.0 / 12.0);
+    }
+
+    #[test]
     fn calculate_purity_of_empty_query() {
         let motifs = vec!["CAG".as_bytes().to_vec(), "CCG".as_bytes().to_vec()];
         let hmm = build_hmm(&motifs);

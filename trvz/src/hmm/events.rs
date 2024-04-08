@@ -67,7 +67,8 @@ pub fn get_events(hmm: &Hmm, motifs: &[Vec<u8>], states: &[usize], query: &[u8])
         let event = match offset.div_euclid(motif_len) {
             0 => {
                 let base = query[base_index];
-                if base == get_base_match(&hmm, state) {
+                let expected_base = get_base_match(&hmm, state);
+                if base == expected_base || expected_base == b'N' {
                     HmmEvent::Match
                 } else {
                     HmmEvent::Mismatch
@@ -110,6 +111,8 @@ pub fn get_base_match(hmm: &Hmm, state: usize) -> u8 {
             4 => b'G',
             _ => handle_error_and_exit(format!("Unexpected base match event")),
         }
+    } else if top_indexes.len() == 4 {
+        b'N'
     } else {
         b' '
     }
@@ -125,6 +128,13 @@ mod tests {
         let motifs = vec!["A".as_bytes().to_vec()];
         let hmm = build_hmm(&motifs);
         assert_eq!(get_base_match(&hmm, 3), b'A');
+    }
+
+    #[test]
+    fn states_with_equal_emission_probs_match_n_base() {
+        let motifs = vec!["N".as_bytes().to_vec()];
+        let hmm = build_hmm(&motifs);
+        assert_eq!(get_base_match(&hmm, 3), b'N');
     }
 
     #[test]
