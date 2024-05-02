@@ -6,17 +6,16 @@
 
 TRGT is a tool for targeted genotyping of tandem repeats from PacBio HiFi data.
 In addition to the basic size genotyping, TRGT profiles sequence composition,
-mosaicism, and CpG methylation of each analyzed repeat. TRGT comes with a
-companion tool TRVZ for visualization of reads overlapping the repeats.
+mosaicism, and CpG methylation of each analyzed repeat and visualization of reads overlapping the repeats.
 
 ## Early version warning
 
 Please note that TRGT is still under active development. We anticipate some
-changes to the input and output file formats of both TRGT and TRVZ.
+changes to the input and output file formats of TRGT.
 
 ## Availability
 
-- TRGT and TRVZ Linux binaries are [available here](https://github.com/PacificBiosciences/trgt/releases)
+- TRGT Linux binary is [available here](https://github.com/PacificBiosciences/trgt/releases)
 - Repeat definition files are available in [this Zenodo repository](https://zenodo.org/record/8329210)
   and definitions of known pathogenic repeats are [also available here](repeats/).
 
@@ -36,7 +35,7 @@ converting results into TRGTdb as well as example analyses. TRGTdb was developed
   - Introductory tutorial: [non-interactive](docs/tutorial.md) and
     [interactive](https://mybinder.org/v2/gh/tandem-repeat-workflows/trgt-tutorial/HEAD?labpath=tutorial.ipynb)
     versions
-  - [Interpreting TRVZ plots](docs/trvz-plots.md)
+  - [Interpreting TRGT plots](docs/trvz-plots.md)
 - Reference
   - [Command-line interface](docs/cli.md)
   - [Repeat definition file](docs/repeat_files.md)
@@ -50,7 +49,7 @@ or open a GitHub issue.
 
 ## Support information
 
-TRGT is a pre-release software intended for research use only and not for use
+TRGT is currently in active development and is intended for research use only and not for use
 in diagnostic procedures. While efforts have been made to ensure that TRGT
 lives up to the quality that PacBio strives for, we make no warranty regarding
 this software.
@@ -113,6 +112,13 @@ tandem repeats at genome scale. 2024](https://www.nature.com/articles/s41587-023
 - 0.9.0
   - Add support for polyalanine repeats (by allowing characters `N` in the motif sequence)
   - Fix a bug causing TRVZ to error out on polyalanine repeats
+- 1.0.0
+  - **Breaking change**: TRGT and TRVZ are now merged into a single binary. Users need to run subcommands `trgt genotype` and `trgt plot` for genotyping and visualization, respectively.
+  - **Breaking change**:  A padding base is now automatically added to all genotyped allele sequences in the VCF file, ensuring better compliance with VCF standards and handling of zero-length alleles.
+  - Added a new subcommand `trgt validate`. This command allows for validation of a repeat catalog against a given reference genome and reports statistics for any malformed entries.
+  - Lower memory footprint: Better memory management significantly reduces memory usage with large repeat catalogs.
+  - Updated error handling: Malformed entries are now logged as errors without terminating the program.
+  - Added shorthand CLI options to simplify command usage.
 
 ### DISCLAIMER
 

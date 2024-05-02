@@ -1,11 +1,11 @@
 # Introductory tutorial
 
-In this tutorial, you will learn the basics of TRGT and TRVZ by analyzing a
+In this tutorial, you will learn the basics of TRGT by analyzing a
 tiny example dataset included in this repository.
 
 ## Prerequisites
 
-- Download the [latest TRGT and TRVZ binaries](https://github.com/PacificBiosciences/trgt/releases)
+- Download the [latest TRGT binary](https://github.com/PacificBiosciences/trgt/releases)
 - Download the [tiny example dataset](https://github.com/PacificBiosciences/trgt/tree/main/example)
 - Install recent versions of `samtools` and `bcftools`
 
@@ -26,7 +26,7 @@ chrA    10000    10061    ID=TR1;MOTIFS=CAG;STRUC=(CAG)n
 To genotype the repeat, run:
 
 ```bash
-./trgt --genome example/reference.fasta \
+./trgt genotype --genome example/reference.fasta \
        --repeats example/repeat.bed \
        --reads example/sample.bam \
        --output-prefix sample
@@ -52,7 +52,7 @@ It says that:
 
 ## Sort and index the outputs
 
-TRGT outputs are not sorted. So you need to sort and index the VCF:
+TRGT genotyping outputs are not sorted. So you need to sort and index the VCF:
 
 ```bash
 bcftools sort -Ob -o sample.sorted.vcf.gz sample.vcf.gz
@@ -73,7 +73,7 @@ And that's it! The output files are now ready for downstream analysis.
 To visualize the repeat with the identifier "TR1", run:
 
 ```bash
-./trvz --genome example/reference.fasta \
+./trgt plot --genome example/reference.fasta \
        --repeats example/repeat.bed \
        --vcf sample.sorted.vcf.gz \
        --spanning-reads sample.spanning.sorted.bam \
@@ -81,7 +81,7 @@ To visualize the repeat with the identifier "TR1", run:
        --image TR1.svg
 ```
 
-TRVZ outputs a file `TR1.svg` that contains the read pileup image. Note that the
+TRGT outputs a file `TR1.svg` that contains the read pileup image. Note that the
 SVG file can be directly edited in vector graphics editing software like
 [Inkscape](https://inkscape.org/).
 
