@@ -80,7 +80,7 @@ mod tests {
         let hmm = build_hmm(&motifs);
         //                 GCNGCNGCNGXN
         let query = "GCAGCCGCTGAG";
-        let states = hmm.label(&query);
+        let states = hmm.label(query);
         let purity = calc_purity(query.as_bytes(), &hmm, &motifs, &states);
         assert_eq!(purity, 11.0 / 12.0);
     }
@@ -90,8 +90,8 @@ mod tests {
         let motifs = vec!["CAG".as_bytes().to_vec(), "CCG".as_bytes().to_vec()];
         let hmm = build_hmm(&motifs);
         let query = "";
-        let states = hmm.label(&query);
-        let purity = calc_purity(&query.as_bytes(), &hmm, &motifs, &states);
+        let states = hmm.label(query);
+        let purity = calc_purity(query.as_bytes(), &hmm, &motifs, &states);
         assert!(purity.is_nan());
     }
 }

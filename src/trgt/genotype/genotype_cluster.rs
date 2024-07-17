@@ -52,12 +52,18 @@ pub fn make_consensus(
 pub fn genotype(ploidy: Ploidy, seqs: &[&[u8]], trs: &[&str]) -> (Gt, Vec<String>, Vec<i32>) {
     let mut dists = get_dist_matrix(seqs);
     let num_seqs = seqs.len();
-    if ploidy == Ploidy::One {
+    if ploidy == Ploidy::One || num_seqs == 1 {
         let group: Vec<usize> = (0..num_seqs).collect();
         let (allele, size) = make_consensus(num_seqs, trs, &dists, &group);
-        let gt = Gt::from(size);
         let classifications = vec![0; num_seqs];
-        return (gt, vec![allele], classifications);
+        if ploidy == Ploidy::One {
+            let gt = Gt::from(size);
+            return (gt, vec![allele], classifications);
+        }
+
+        // one read, two alleles
+        let gt = Gt::from([size.clone(), size]);
+        return (gt, vec![allele.clone(), allele], classifications);
     }
     let mut groups = cluster(num_seqs, &mut dists);
 
@@ -133,15 +139,8 @@ pub fn genotype(ploidy: Ploidy, seqs: &[&[u8]], trs: &[&str]) -> (Gt, Vec<String
 }
 
 pub fn cluster(num_seqs: usize, dists: &mut [f64]) -> Vec<Vec<usize>> {
-    if num_seqs == 0 {
-        return Vec::new();
-    }
-
+    assert!(num_seqs >= 2);
     assert_eq!(num_seqs * (num_seqs - 1) / 2, dists.len());
-    if num_seqs == 1 {
-        return vec![vec![0]];
-    }
-
     if num_seqs == 2 {
         return vec![vec![0], vec![1]];
     }

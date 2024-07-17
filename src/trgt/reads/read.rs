@@ -197,7 +197,7 @@ fn get_ml_tag(rec: &bam::Record) -> Option<Aux> {
 ///
 /// # Returns
 /// Returns an `Option<f64>` which is `Some` if the RQ tag is present and can be parsed as a float, otherwise `None`.
-fn get_rq_tag(rec: &bam::Record) -> Option<f64> {
+pub fn get_rq_tag(rec: &bam::Record) -> Option<f64> {
     match rec.aux(b"rq") {
         Ok(Aux::Float(value)) => Some(f64::from(value)),
         _ => None,

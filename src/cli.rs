@@ -1,4 +1,7 @@
-use crate::utils::{Genotyper, Result, TrgtScoring};
+use crate::{
+    merge::vcf_writer::OutputType,
+    utils::{Genotyper, Result, TrgtScoring},
+};
 use chrono::Datelike;
 use clap::{ArgAction, ArgGroup, Parser, Subcommand};
 use env_logger::fmt::Color;
@@ -46,6 +49,91 @@ pub enum Command {
     Plot(PlotArgs),
     #[clap(about = "Tandem Repeat Catalog Validator")]
     Validate(ValidateArgs),
+    #[clap(about = "Tandem Repeat VCF Merger")]
+    Merge(MergeArgs),
+}
+
+#[derive(Parser, Debug)]
+#[command(group(ArgGroup::new("merge")))]
+#[command(arg_required_else_help(true))]
+pub struct MergeArgs {
+    #[clap(required = true)]
+    #[clap(short = 'v')]
+    #[clap(long = "vcf")]
+    #[clap(help = "VCF files to merge")]
+    #[clap(value_name = "VCF")]
+    #[clap(num_args = 1..)]
+    pub vcfs: Vec<PathBuf>,
+
+    #[clap(short = 'g')]
+    #[clap(long = "genome")]
+    #[clap(help = "Path to reference genome FASTA")]
+    #[clap(value_name = "FASTA")]
+    #[arg(value_parser = check_file_exists)]
+    pub genome_path: PathBuf,
+
+    #[clap(short = 'o')]
+    #[clap(long = "output")]
+    #[clap(value_name = "FILE")]
+    #[clap(help = "Write output to a file [standard output]")]
+    #[arg(value_parser = check_prefix_path)]
+    pub output: Option<String>,
+
+    #[clap(help_heading("Advanced"))]
+    #[clap(short = 'O')]
+    #[clap(long = "output-type")]
+    #[clap(value_name = "OUTPUT_TYPE")]
+    #[clap(help = "Output type: u|b|v|z, u/b: un/compressed BCF, v/z: un/compressed VCF")]
+    #[clap(value_parser = merge_validate_output_type)]
+    pub output_type: Option<OutputType>,
+
+    #[clap(help_heading("Advanced"))]
+    #[clap(long = "skip-n")]
+    #[clap(value_name = "SKIP_N")]
+    #[clap(help = "Skip the first N records")]
+    pub skip_n: Option<usize>,
+
+    #[clap(help_heading("Advanced"))]
+    #[clap(long = "process-n")]
+    #[clap(value_name = "process_N")]
+    #[clap(help = "Only process N records")]
+    pub process_n: Option<usize>,
+
+    #[clap(help_heading("Advanced"))]
+    #[clap(long = "print-header")]
+    #[clap(help = "Print only the merged header and exit")]
+    pub print_header: bool,
+
+    #[clap(help_heading("Advanced"))]
+    #[clap(long = "force-single")]
+    #[clap(help = "Run even if there is only one file on input")]
+    pub force_single: bool,
+
+    #[clap(help_heading("Advanced"))]
+    #[clap(hide = true)]
+    #[clap(long = "force-samples")]
+    #[clap(help = "Resolve duplicate sample names")]
+    pub force_samples: bool,
+
+    #[clap(help_heading("Advanced"))]
+    #[clap(long = "no-version")]
+    #[clap(help = "Do not append version and command line to the header")]
+    pub no_version: bool,
+
+    #[clap(help_heading("Advanced"))]
+    #[clap(hide = true)]
+    #[clap(long = "missing-to-ref")]
+    #[clap(help = "Assume genotypes at missing sites are 0/0")]
+    pub missing_to_ref: bool,
+
+    #[clap(help_heading("Advanced"))]
+    #[clap(hide = true)]
+    #[clap(long = "strategy")]
+    #[clap(value_name = "STRATEGY")]
+    #[clap(help = "Set variant merging strategy to use")]
+    #[clap(value_parser(["exact"]))]
+    #[clap(default_value = "exact")]
+    pub merge_strategy: String,
 }
 
 #[derive(Parser, Debug)]
@@ -390,4 +478,57 @@ fn scoring_from_string(s: &str) -> Result<TrgtScoring> {
         kmer_len: values[4] as usize,
         bandwidth: values[5] as usize,
     })
+}
+
+fn merge_validate_output_type(s: &str) -> Result<OutputType> {
+    let valid_prefixes = ["u", "b", "v", "z"];
+    if valid_prefixes.contains(&s) {
+        return match s {
+            "u" => Ok(OutputType::Bcf {
+                is_uncompressed: true,
+                level: None,
+            }),
+            "v" => Ok(OutputType::Vcf {
+                is_uncompressed: true,
+                level: None,
+            }),
+            "b" => Ok(OutputType::Bcf {
+                is_uncompressed: false,
+                level: None,
+            }),
+            "z" => Ok(OutputType::Vcf {
+                is_uncompressed: false,
+                level: None,
+            }),
+            _ => unreachable!(),
+        };
+    }
+
+    // NOTE: Can't actually set compression level in rust/htslib at the moment
+    // if s.len() == 2 {
+    //     let (prefix, suffix) = s.split_at(1);
+    //     if (prefix == "b" || prefix == "z") && suffix.chars().all(|c| c.is_digit(10)) {
+    //         return match prefix {
+    //             "b" => Ok(OutputType::Bcf {
+    //                 is_uncompressed: false,
+    //                 level: Some(suffix.parse().unwrap()),
+    //             }),
+    //             "z" => Ok(OutputType::Vcf {
+    //                 is_uncompressed: false,
+    //                 level: Some(suffix.parse().unwrap()),
+    //             }),
+    //             _ => unreachable!(),
+    //         };
+    //     } else if (prefix == "u" || prefix == "v") && suffix.chars().all(|c| c.is_digit(10)) {
+    //         return Err(format!(
+    //             "Error: compression level ({}) cannot be set on uncompressed streams ({})",
+    //             suffix, prefix
+    //         ));
+    //     }
+    // }
+
+    Err(format!(
+        "Invalid output type: {}. Must be one of u, b, v, z.",
+        s
+    ))
 }

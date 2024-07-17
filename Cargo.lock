@@ -1289,7 +1289,7 @@ version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5f5376ea5e30ce23c03eb77cbe4962b988deead10910c372b226388b594c084"
 dependencies = [
- "semver",
+ "semver 0.1.20",
 ]
 
 [[package]]
@@ -1347,6 +1347,12 @@ name = "semver"
 version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4f410fedcf71af0345d7607d246e7ad15faaadd49d240ee3b24e5dc21a820ac"
+
+[[package]]
+name = "semver"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61697e0a1c7e512e84a621326239844a24d8207b4669b41bc18b32ea5cbf988b"
 
 [[package]]
 name = "serde"
@@ -1626,7 +1632,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "trgt"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arrayvec",
  "bio",
@@ -1643,6 +1649,7 @@ dependencies = [
  "rayon",
  "resvg",
  "rust-htslib",
+ "semver 1.0.23",
  "svg2pdf",
  "tempfile",
  "tiny-skia",

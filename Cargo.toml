@@ -1,6 +1,6 @@
 [package]
 name = "trgt"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 build = "build.rs"
 
@@ -27,3 +27,4 @@ svg2pdf = "0.9"
 tempfile = "3"
 rayon = "1.10"
 crossbeam-channel = "0.5"
+semver = "1.0"

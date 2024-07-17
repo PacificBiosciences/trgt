@@ -188,7 +188,7 @@ mod tests {
     use super::*;
     use crate::hmm::spans::Span;
 
-    fn summarize(spans: &Vec<Span>) -> Vec<(usize, usize, usize)> {
+    fn summarize(spans: &[Span]) -> Vec<(usize, usize, usize)> {
         let mut summary = Vec::new();
         for (motif_index, group) in &spans
             .iter()

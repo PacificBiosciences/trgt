@@ -27,9 +27,9 @@ struct ThreadLocalData {
 }
 
 thread_local! {
-    static LOCAL_BAM_READER: ThreadLocalData = ThreadLocalData {
+    static LOCAL_BAM_READER: ThreadLocalData = const { ThreadLocalData {
         bam: RefCell::new(None),
-    };
+    } };
 }
 
 const CHANNEL_BUFFER_SIZE: usize = 2048;

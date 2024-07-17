@@ -5,4 +5,5 @@ mod meth;
 mod snp;
 
 mod read;
+pub use read::get_rq_tag;
 pub use read::HiFiRead;

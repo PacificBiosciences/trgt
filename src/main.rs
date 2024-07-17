@@ -1,7 +1,7 @@
 use clap::Parser;
 use trgt::{
     cli::{init_verbose, Cli, Command, FULL_VERSION},
-    commands::{genotype, plot, validate},
+    commands::{genotype, merge, plot, validate},
     utils::{handle_error_and_exit, Result},
 };
 
@@ -12,6 +12,7 @@ fn runner() -> Result<()> {
         Command::Genotype(_) => "genotype",
         Command::Plot(_) => "plot",
         Command::Validate(_) => "validate",
+        Command::Merge(_) => "merge",
     };
 
     log::info!(
@@ -24,6 +25,7 @@ fn runner() -> Result<()> {
         Command::Genotype(args) => genotype::trgt(args)?,
         Command::Plot(args) => plot::trvz(args)?,
         Command::Validate(args) => validate::validate(args)?,
+        Command::Merge(args) => merge::merge(args)?,
     }
     log::info!("{} end", env!("CARGO_PKG_NAME"));
     Ok(())
