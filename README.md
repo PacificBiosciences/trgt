@@ -123,6 +123,8 @@ tandem repeats at genome scale. 2024](https://www.nature.com/articles/s41587-023
   - Added subsampling of regions with ultra-high coverage (`>MAX_DEPTH * 3`, by default 750); implemented via reservoir sampling.
   - Fixed a cluster genotyper bug that occurred when only a single read covered a locus.
   - Added new logic for filtering non-HiFi reads: remove up to 3% of lower quality reads that do not match the expected repeat sequence.
+- 1.1.1
+  - Hotfix: Read filtering logic no longer removes reads without RQ tags.
 
 ### DISCLAIMER
 

@@ -297,7 +297,7 @@ fn extract_reads(
                     continue;
                 }
 
-                if get_rq_tag(&record).unwrap_or(0.0) < min_read_qual {
+                if get_rq_tag(&record).unwrap_or(1.0) < min_read_qual {
                     n_filt += 1;
                     continue;
                 }
@@ -322,7 +322,7 @@ fn extract_reads(
                         continue;
                     }
 
-                    if get_rq_tag(&record).unwrap_or(0.0) < min_read_qual {
+                    if get_rq_tag(&record).unwrap_or(1.0) < min_read_qual {
                         n_filt += 1;
                         continue;
                     }
