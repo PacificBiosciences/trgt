@@ -13,11 +13,12 @@ use std::{
 };
 
 pub static FULL_VERSION: Lazy<String> = Lazy::new(|| {
-    format!(
-        "{}-{}",
-        env!("CARGO_PKG_VERSION"),
-        env!("VERGEN_GIT_DESCRIBE")
-    )
+    let git_describe = env!("VERGEN_GIT_DESCRIBE");
+    if git_describe.is_empty() {
+        env!("CARGO_PKG_VERSION").to_string()
+    } else {
+        format!("{}-{}", env!("CARGO_PKG_VERSION"), git_describe)
+    }
 });
 
 #[derive(Parser)]
@@ -63,6 +64,7 @@ pub struct MergeArgs {
     #[clap(help = "VCF files to merge")]
     #[clap(value_name = "VCF")]
     #[clap(num_args = 1..)]
+    #[arg(value_parser = check_file_exists)]
     pub vcfs: Vec<PathBuf>,
 
     #[clap(short = 'g')]
@@ -70,7 +72,7 @@ pub struct MergeArgs {
     #[clap(help = "Path to reference genome FASTA")]
     #[clap(value_name = "FASTA")]
     #[arg(value_parser = check_file_exists)]
-    pub genome_path: PathBuf,
+    pub genome_path: Option<PathBuf>,
 
     #[clap(short = 'o')]
     #[clap(long = "output")]
@@ -134,6 +136,18 @@ pub struct MergeArgs {
     #[clap(value_parser(["exact"]))]
     #[clap(default_value = "exact")]
     pub merge_strategy: String,
+
+    #[clap(help_heading("Advanced"))]
+    #[clap(long = "quit-on-errors")]
+    #[clap(help = "Quit immediately on errors during merging")]
+    pub quit_on_error: bool,
+
+    #[clap(help_heading("Advanced"))]
+    #[clap(long = "contig")]
+    #[clap(value_name = "CONTIG")]
+    #[clap(help = "Process only the specified contigs (comma-separated list)")]
+    #[clap(value_delimiter = ',')]
+    pub contigs: Option<Vec<String>>,
 }
 
 #[derive(Parser, Debug)]
@@ -247,6 +261,11 @@ pub struct GenotypeArgs {
     #[clap(default_value = "0.98")]
     // #[arg(value_parser = ensure_unit_float)]
     pub min_hifi_read_qual: f64,
+
+    #[clap(help_heading("Advanced"))]
+    #[clap(long = "disable-bam-output")]
+    #[clap(help = "Disable BAM output")]
+    pub disable_bam_output: bool,
 
     #[clap(help_heading("Advanced"))]
     #[clap(long = "max-depth")]
@@ -363,7 +382,8 @@ pub fn init_verbose(args: &Cli) {
     let filter_level: LevelFilter = match args.verbosity {
         0 => LevelFilter::Warn,
         1 => LevelFilter::Info,
-        _ => LevelFilter::Debug,
+        2 => LevelFilter::Debug,
+        _ => LevelFilter::Trace,
     };
 
     env_logger::Builder::from_default_env()

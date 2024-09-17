@@ -12,7 +12,7 @@ pub fn merge(args: MergeArgs) -> Result<()> {
         return Ok(());
     }
 
-    vcf_processor.merge_variants();
+    vcf_processor.merge_variants()?;
 
     // TODO: If --output, --write-index is set and the output is compressed, index the file
     log::info!("Total execution time: {:.2?}", start_timer.elapsed());

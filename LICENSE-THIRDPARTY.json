@@ -1368,6 +1368,15 @@
     "description": "Semantic version parsing and comparison."
   },
   {
+    "name": "semver",
+    "version": "1.0.23",
+    "authors": "David Tolnay <dtolnay@gmail.com>",
+    "repository": "https://github.com/dtolnay/semver",
+    "license": "Apache-2.0 OR MIT",
+    "license_file": null,
+    "description": "Parser and evaluator for Cargo's flavor of Semantic Versioning"
+  },
+  {
     "name": "serde",
     "version": "1.0.197",
     "authors": "Erick Tryzelaar <erick.tryzelaar@gmail.com>|David Tolnay <dtolnay@gmail.com>",
@@ -1621,7 +1630,7 @@
   },
   {
     "name": "trgt",
-    "version": "1.0.0",
+    "version": "1.2.0",
     "authors": null,
     "repository": null,
     "license": null,

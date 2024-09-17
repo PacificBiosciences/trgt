@@ -3,6 +3,7 @@
 Commands:
 - `genotype`
 - `plot`
+- `merge`
 - `validate`
 
 Options:
@@ -33,6 +34,7 @@ Advanced:
 - `--output-flank-len <FLANK_LEN>` Length of flanking sequence to report on output [default: 50].
 - `--fixed-flanks` Keep flank length fixed.
 - `--min-read-quality <MIN_RQ>` Minimum HiFi rq value required to use a read for genotyping [default: 0.98].
+- `--disable-bam-output` Disable BAM output.
 - `--max-depth <MAX_DEPTH>` Maximum locus depth [default: 250].
 
 ## Plot command-line
@@ -52,17 +54,34 @@ Plotting:
   allele. Waterfall plots display unaligned repeat sequences without aligning
   them to the (consensus) allele. Waterfall plots are especially useful for QC
   of repeat calls and for visualization of mosaic expansions [default: allele].
-- `--show <show>` either motifs (`motifs`) or methylation
+- `--show <show>` either motifs (`motifs`) or methylation.
   (`meth`) is visualized,  [default: motifs].
 
 Advanced:
 - `--flank-len <FLANK_LEN>` Length of flanking regions [default: 50].
 
+## Merge command-line
+
+Options:
+- `-v, --vcf <VCF>` VCF files to merge.
+- `-g, --genome <FASTA>` Path to the FASTA file containing reference genome.
+- `-o, --output <FILE>` Write output to a file [standard output].
+
+Advanced:
+- `-O, --output-type <OUTPUT_TYPE>` Output type: u|b|v|z, u/b: un/compressed BCF, v/z: un/compressed VCF.
+- `--skip-n <SKIP_N>` Skip the first N records.
+- `--process-n <PROCESS_N>` Only process N records.
+- `--print-header` Print only the merged header and exit.
+- `--force-single` Run even if there is only one file on input.
+- `--no-version` Do not append version and command line to the header.
+- `--quit-on-errors` Quit immediately on errors during merging.
+- `--contig <CONTIG>` Process only the specified contigs (comma-separated list).
+
 ## Validate command-line
 
 Options:
-- `-g, --genome <FASTA>` Path to the FASTA file containing reference genome
+- `-g, --genome <FASTA>` Path to the FASTA file containing reference genome.
 - `-b, --repeats <REPEATS>` BED file with repeat coordinates and structure.
 
 Advanced:
-- `--flank-len <FLANK_LEN>` Length of flanking regions [default: 50]
+- `--flank-len <FLANK_LEN>` Length of flanking regions [default: 50].

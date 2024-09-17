@@ -39,10 +39,6 @@ pub fn analyze(
 
     let (reads, spans) = get_spanning_reads(locus, params, reads);
 
-    if reads.is_empty() {
-        return Ok(LocusResult::empty());
-    }
-
     const MIN_RQ_FOR_PURITY: f64 = 0.9;
     let (reads, spans) = if params.min_read_qual < MIN_RQ_FOR_PURITY {
         let ret = filter_impure_trs(locus, &reads, &spans, MIN_RQ_FOR_PURITY);
@@ -57,6 +53,10 @@ pub fn analyze(
     } else {
         (reads, spans)
     };
+
+    if reads.is_empty() {
+        return Ok(LocusResult::empty());
+    }
 
     let trs = reads
         .iter()

@@ -18,4 +18,4 @@ pub use math::median;
 pub use ploidy::Ploidy;
 pub use readers::{open_catalog_reader, open_genome_reader};
 pub use region::GenomicRegion;
-pub use util::{handle_error_and_exit, Result};
+pub use util::{format_number_with_commas, handle_error_and_exit, Result};

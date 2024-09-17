@@ -1,5 +1,5 @@
 use super::Result;
-use flate2::read::GzDecoder;
+use flate2::read::MultiGzDecoder;
 use rust_htslib::faidx;
 use std::fs::File;
 use std::io::{BufReader, Read as ioRead};
@@ -12,7 +12,7 @@ pub fn open_catalog_reader(path: &Path) -> Result<BufReader<Box<dyn ioRead>>> {
     }
     let file = File::open(path).map_err(|e| e.to_string())?;
     if is_gzipped(path) {
-        let gz_decoder = GzDecoder::new(file);
+        let gz_decoder = MultiGzDecoder::new(file);
         if gz_decoder.header().is_some() {
             Ok(BufReader::new(Box::new(gz_decoder)))
         } else {

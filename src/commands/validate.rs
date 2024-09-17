@@ -1,6 +1,9 @@
 use crate::cli::ValidateArgs;
 use crate::trgt::locus::get_loci;
-use crate::utils::{open_catalog_reader, open_genome_reader, Genotyper, Karyotype, Result};
+use crate::utils::{
+    format_number_with_commas, open_catalog_reader, open_genome_reader, Genotyper, Karyotype,
+    Result,
+};
 
 pub fn validate(args: ValidateArgs) -> Result<()> {
     let catalog_reader = open_catalog_reader(&args.repeats_path)?;
@@ -24,7 +27,7 @@ pub fn validate(args: ValidateArgs) -> Result<()> {
                 success_count += 1
             }
             Err(e) => {
-                log::error!("{}", e);
+                eprintln!("{}", e);
                 error_count += 1;
             }
         }
@@ -37,7 +40,7 @@ pub fn validate(args: ValidateArgs) -> Result<()> {
     let success_percentage = (success_count as f64 / total as f64) * 100.0;
     let error_percentage = (error_count as f64 / total as f64) * 100.0;
 
-    log::info!(
+    println!(
         "Motifs per Locus - Range: [{},{}], Median: {:.2}, Mean: {:.2}, StdDev: {:.2}",
         motifs_stats.min,
         motifs_stats.max,
@@ -45,22 +48,21 @@ pub fn validate(args: ValidateArgs) -> Result<()> {
         motifs_stats.median,
         motifs_stats.std_dev
     );
-    log::info!(
+    println!(
         "TR Lengths - Range: [{},{}], Median: {:.2}, Mean: {:.2}, StdDev: {:.2}",
-        tr_stats.min,
-        tr_stats.max,
-        tr_stats.mean,
-        tr_stats.median,
-        tr_stats.std_dev
+        tr_stats.min, tr_stats.max, tr_stats.mean, tr_stats.median, tr_stats.std_dev
     );
 
     match error_count {
-        0 => log::info!("Validation successful. Loci pass={}", success_count),
-        _ => log::info!(
-            "Validation failed. Loci pass={} ({:.2}%), fail={} ({:.2}%)",
-            success_count,
+        0 => println!(
+            "Validation successful. Loci pass = {}",
+            format_number_with_commas(success_count)
+        ),
+        _ => println!(
+            "Validation failed. Loci pass = {} ({:.2}%), fail = {} ({:.2}%)",
+            format_number_with_commas(success_count),
             success_percentage,
-            error_count,
+            format_number_with_commas(error_count),
             error_percentage
         ),
     }

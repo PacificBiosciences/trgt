@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     {
         Ok(_) => {}
         Err(_e) => {
-            println!("cargo:rustc-env=VERGEN_GIT_DESCRIBE=unknown");
+            println!("cargo:rustc-env=VERGEN_GIT_DESCRIBE=");
         }
     }
     Ok(())

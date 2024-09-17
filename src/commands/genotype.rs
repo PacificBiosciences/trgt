@@ -57,9 +57,15 @@ pub fn trgt(args: GenotypeArgs) -> Result<()> {
     })?;
 
     let output_flank_len = std::cmp::min(args.flank_len, args.output_flank_len);
-    let mut bam_writer = create_writer(&args.output_prefix, "spanning.bam", |path| {
-        BamWriter::new(path, bam_header, output_flank_len)
-    })?;
+    let bam_writer = if !args.disable_bam_output {
+        Some(create_writer(
+            &args.output_prefix,
+            "spanning.bam",
+            |path| BamWriter::new(path, bam_header, output_flank_len),
+        )?)
+    } else {
+        None
+    };
 
     let (sender_locus, receiver_locus) = bounded(CHANNEL_BUFFER_SIZE);
     let locus_stream_thread = thread::spawn(move || {
@@ -75,9 +81,15 @@ pub fn trgt(args: GenotypeArgs) -> Result<()> {
 
     let (sender_result, receiver_result) = bounded(CHANNEL_BUFFER_SIZE);
     let writer_thread = thread::spawn(move || {
-        for (locus, results) in &receiver_result {
-            vcf_writer.write(&locus, &results);
-            bam_writer.write(&locus, &results);
+        if let Some(mut bam_writer) = bam_writer {
+            for (locus, results) in &receiver_result {
+                vcf_writer.write(&locus, &results);
+                bam_writer.write(&locus, &results);
+            }
+        } else {
+            for (locus, results) in &receiver_result {
+                vcf_writer.write(&locus, &results);
+            }
         }
     });
 

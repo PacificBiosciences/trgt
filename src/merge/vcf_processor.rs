@@ -5,36 +5,47 @@ use super::{
 };
 use crate::{
     cli::MergeArgs,
-    utils::{open_genome_reader, Result},
+    utils::{format_number_with_commas, open_genome_reader, Result},
 };
 use once_cell::sync::Lazy;
 use rust_htslib::{
-    bcf::{self, header::HeaderView, record::GenotypeAllele, Record},
+    bcf::{self, record::GenotypeAllele, Record},
     faidx,
 };
 use semver::Version;
-use std::{any::Any, cmp::Ordering, collections::BinaryHeap, env};
+use std::{
+    any::Any,
+    cmp::Ordering,
+    collections::{BinaryHeap, HashSet},
+    env,
+};
 
 const MISSING_INTEGER: i32 = i32::MIN;
 const VECTOR_END_INTEGER: i32 = i32::MIN + 1;
 static MISSING_FLOAT: Lazy<f32> = Lazy::new(|| f32::from_bits(0x7F80_0001));
 static VECTOR_END_FLOAT: Lazy<f32> = Lazy::new(|| f32::from_bits(0x7F80_0002));
 
-fn _vec_to_comma_separated_string(vec: Vec<&[u8]>) -> String {
-    vec.into_iter()
-        .map(|slice| String::from_utf8_lossy(slice).to_string())
-        .collect::<Vec<String>>()
-        .join(",")
+struct FormatData {
+    als: Vec<i32>,
+    allrs: Vec<Vec<u8>>,
+    sds: Vec<i32>,
+    mcs: Vec<Vec<u8>>,
+    mss: Vec<Vec<u8>>,
+    aps: Vec<f32>,
+    ams: Vec<f32>,
 }
 
-fn _header_to_string(header: &bcf::Header) -> String {
-    unsafe {
-        let header_ptr = header.inner;
-        let mut header_len: i32 = 0;
-        let header_cstr = rust_htslib::htslib::bcf_hdr_fmt_text(header_ptr, 0, &mut header_len);
-        std::ffi::CStr::from_ptr(header_cstr)
-            .to_string_lossy()
-            .into_owned()
+impl FormatData {
+    fn new() -> Self {
+        FormatData {
+            als: Vec::new(),
+            allrs: Vec::new(),
+            sds: Vec::new(),
+            mcs: Vec::new(),
+            mss: Vec::new(),
+            aps: Vec::new(),
+            ams: Vec::new(),
+        }
     }
 }
 
@@ -100,7 +111,7 @@ struct VcfRecordWithSource {
 
 impl PartialEq for VcfRecordWithSource {
     fn eq(&self, other: &Self) -> bool {
-        self.record.rid() == other.record.rid() && self.record.pos() == other.record.pos()
+        self.record.pos() == other.record.pos()
     }
 }
 
@@ -114,21 +125,19 @@ impl PartialOrd for VcfRecordWithSource {
 
 impl Ord for VcfRecordWithSource {
     fn cmp(&self, other: &Self) -> Ordering {
-        match self.record.rid().cmp(&other.record.rid()) {
-            Ordering::Equal => self.record.pos().cmp(&other.record.pos()).reverse(),
-            other => other.reverse(),
-        }
+        self.record.pos().cmp(&other.record.pos()).reverse()
     }
 }
 
 pub struct VcfProcessor {
     pub readers: Vec<VcfReader>,
     pub writer: VcfWriter,
-    pub genome_reader: faidx::Reader, // TODO: Make optional? Only needed for <1.0
-    // TODO: add args struct
+    pub genome_reader: Option<faidx::Reader>,
+    pub contig_order: Vec<String>,
     pub skip_n: usize,
     pub process_n: usize,
     pub needs_padding: bool,
+    pub quit_on_error: bool,
 }
 
 impl VcfProcessor {
@@ -138,22 +147,52 @@ impl VcfProcessor {
             return Err("Expected two or more files to merge, got only one. Use --force-single to proceed anyway".into());
         }
 
-        let genome_reader = open_genome_reader(&args.genome_path)?;
-        let out_header = Self::create_output_header(&vcf_readers, args)?;
-        let writer = VcfWriter::new(&out_header, &args.output_type, args.output.as_ref())?;
+        let mut contig_order = vcf_readers.get_contig_order()?;
+
+        if let Some(ref user_contigs) = args.contigs {
+            let user_contig_set: HashSet<&String> = user_contigs.iter().collect();
+            let original_contig_set: HashSet<&String> = contig_order.iter().collect();
+
+            if !user_contig_set.is_subset(&original_contig_set) {
+                let missing_contigs: Vec<&&String> =
+                    user_contig_set.difference(&original_contig_set).collect();
+                return Err(format!(
+                    "The following user-specified contigs do not exist in the VCF files: {:?}",
+                    missing_contigs
+                ));
+            }
+            contig_order.retain(|contig| user_contig_set.contains(contig));
+        }
 
         let needs_padding = vcf_readers
             .readers
             .iter()
             .any(|reader| reader.version.major < Version::new(1, 0, 0).major);
 
+        let genome_reader = if needs_padding {
+            Some(open_genome_reader(args.genome_path.as_ref().ok_or(
+                "A reference genome is required for merging pre v1.0 TRGT VCFs, provide as --genome ref.fa"
+            )?)?)
+        } else {
+            None
+        };
+
+        let out_header = Self::create_output_header(&vcf_readers, args)?;
+        let writer = VcfWriter::new(&out_header, &args.output_type, args.output.as_ref())?;
+
+        if needs_padding {
+            log::debug!("At least one VCF file is pre-1.0 and needs base padding!");
+        }
+
         Ok(VcfProcessor {
             readers: vcf_readers.readers,
             writer,
             genome_reader,
+            contig_order,
             skip_n: args.skip_n.unwrap_or(0),
             process_n: args.process_n.unwrap_or(usize::MAX),
             needs_padding,
+            quit_on_error: args.quit_on_error,
         })
     }
 
@@ -186,9 +225,192 @@ impl VcfProcessor {
         );
         out_header.push_record(version_line.as_bytes());
 
-        let command_line = env::args().collect::<Vec<String>>().join(" ");
-        let command_line = format!("##{}Command={}", env!("CARGO_PKG_NAME"), command_line);
+        let command_line = format!(
+            "##{}Command={}",
+            env!("CARGO_PKG_NAME"),
+            env::args().collect::<Vec<String>>().join(" ")
+        );
         out_header.push_record(command_line.as_bytes());
+    }
+
+    pub fn merge_variants(&mut self) -> Result<()> {
+        let mut n = 0;
+        let mut n_processed = 0;
+        let mut n_failed = 0;
+
+        let mut sample_records = vec![None; self.readers.len()];
+
+        for contig in &self.contig_order.clone() {
+            let mut heap = self.init_heap(contig)?;
+
+            while let Some(min_element) = heap.pop() {
+                let min_pos = min_element.record.pos();
+                sample_records[min_element.reader_index] = Some(min_element.record);
+
+                while let Some(peek_next_element) = heap.peek() {
+                    if peek_next_element.record.pos() == min_pos {
+                        let next_element = heap.pop().unwrap();
+                        sample_records[next_element.reader_index] = Some(next_element.record);
+                    } else {
+                        break;
+                    }
+                }
+
+                if n >= self.skip_n {
+                    log::trace!("Processing: {}:{}", contig, min_pos);
+                    if self.needs_padding {
+                        self.add_padding_base(&mut sample_records, contig, min_pos);
+                    }
+                    match self.merge_variant(&sample_records, contig, min_pos) {
+                        Ok(_) => {
+                            n_processed += 1;
+                            if n_processed >= self.process_n {
+                                return Ok(());
+                            }
+                        }
+                        Err(e) => {
+                            if self.quit_on_error {
+                                return Err(e);
+                            }
+                            n_failed += 1;
+                            log::warn!("{} Skipping...", e);
+                        }
+                    }
+                }
+                n += 1;
+
+                self.update_heap(&mut heap, &sample_records)?;
+                sample_records.fill(None);
+            }
+        }
+        let mut log_message = format!(
+            "Successfully merged {} TR sites.",
+            format_number_with_commas(n_processed)
+        );
+        if n_failed > 0 {
+            log_message.push_str(&format!(
+                " Failed to merge {} TR sites!",
+                format_number_with_commas(n_failed)
+            ));
+        }
+        log::info!("{}", log_message);
+        Ok(())
+    }
+
+    fn init_heap(&mut self, contig: &str) -> Result<BinaryHeap<VcfRecordWithSource>> {
+        let mut heap = BinaryHeap::new();
+        for (index, reader) in self.readers.iter_mut().enumerate() {
+            let rid = match reader.header.name2rid(contig.as_bytes()) {
+                Ok(id) => id,
+                Err(_) => continue,
+            };
+
+            if reader.reader.fetch(rid, 0, None).is_err() {
+                continue;
+            }
+
+            if reader.advance() {
+                heap.push(VcfRecordWithSource {
+                    record: reader.current_record.clone(),
+                    reader_index: index,
+                });
+            }
+        }
+        Ok(heap)
+    }
+
+    fn update_heap(
+        &mut self,
+        heap: &mut BinaryHeap<VcfRecordWithSource>,
+        sample_records: &[Option<Record>],
+    ) -> Result<()> {
+        for (index, record) in sample_records.iter().enumerate() {
+            if record.is_some() && self.readers[index].advance() {
+                heap.push(VcfRecordWithSource {
+                    record: self.readers[index].current_record.clone(),
+                    reader_index: index,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn get_padding_base(&self, contig: &str, pos: i64) -> Vec<u8> {
+        if let Some(genome_reader) = &self.genome_reader {
+            genome_reader
+                .fetch_seq(contig, pos as usize, pos as usize)
+                .unwrap_or_else(|_| panic!("Failed to fetch sequence for chromosome {}", contig))
+                .to_ascii_uppercase()
+        } else {
+            panic!("Genome reader is not available, but padding is required")
+        }
+    }
+
+    fn add_padding_base(&mut self, sample_records: &mut [Option<Record>], contig: &str, pos: i64) {
+        let padding_base = self.get_padding_base(contig, pos);
+
+        for (record, reader) in sample_records.iter_mut().zip(&self.readers) {
+            if reader.version.major >= Version::new(1, 0, 0).major {
+                continue;
+            }
+
+            let Some(record) = record else { continue };
+
+            let al_0 = record
+                .format(b"AL")
+                .integer()
+                .expect("Error accessing FORMAT AL")[0]
+                .iter()
+                .min()
+                .cloned()
+                .unwrap();
+
+            // Skip zero-length allele records
+            if al_0 != 0 {
+                let new_alleles: Vec<Vec<u8>> = record
+                    .alleles()
+                    .iter()
+                    .map(|allele| {
+                        let mut new_allele = Vec::with_capacity(1 + allele.len());
+                        new_allele.extend_from_slice(&padding_base);
+                        new_allele.extend_from_slice(allele);
+                        new_allele
+                    })
+                    .collect();
+                let new_alleles_refs: Vec<&[u8]> =
+                    new_alleles.iter().map(|a| a.as_slice()).collect();
+                record
+                    .set_alleles(&new_alleles_refs)
+                    .expect("Failed to set alleles")
+            }
+        }
+    }
+
+    fn merge_variant(
+        &mut self,
+        sample_records: &[Option<Record>],
+        contig: &str,
+        pos: i64,
+    ) -> Result<()> {
+        let template_record = self.get_template_record(sample_records);
+        self.set_dummy_record_fields(template_record);
+
+        let mut format_data = FormatData::new();
+        // The outermost Vec represents different VCFs >  different samples within a VCF > genotype alleles of a sample
+        let mut gt_vecs: Vec<Vec<Vec<GenotypeAllele>>> = Vec::new();
+        let mut alleles: Vec<Vec<&[u8]>> = Vec::new();
+
+        for (record_i, record) in sample_records.iter().enumerate() {
+            if let Some(record) = record {
+                self.process_record(record, &mut format_data, &mut gt_vecs, &mut alleles);
+            } else {
+                self.process_missing_record(record_i, &mut format_data, &mut gt_vecs, &mut alleles);
+            }
+        }
+
+        self.merge_and_write_data(format_data, gt_vecs, alleles)
+            .map_err(|e| format!("Failed to merge at {}:{}: {}.", contig, pos, e,))?;
+        Ok(())
     }
 
     fn set_info_field(&mut self, record: &Record, field_name: &[u8], field_type: FieldType) {
@@ -210,310 +432,226 @@ impl VcfProcessor {
         }
     }
 
-    fn merge_variant(&mut self, sample_records: &[Option<Record>]) {
+    fn get_template_record<'a>(&self, sample_records: &'a [Option<Record>]) -> &'a Record {
         let template_index = sample_records.iter().position(|r| r.is_some()).unwrap();
-        let template_record = sample_records[template_index].as_ref().unwrap();
+        sample_records[template_index].as_ref().unwrap()
+    }
 
+    fn set_dummy_record_fields(&mut self, template_record: &Record) {
         self.writer.dummy_record.set_rid(template_record.rid());
         self.writer.dummy_record.set_pos(template_record.pos());
         self.writer.dummy_record.set_qual(template_record.qual());
 
-        // TODO: Consolidate logic to allow for generic INFO fields: i32, f32, etc...
         self.set_info_field(template_record, b"TRID", FieldType::String);
         self.set_info_field(template_record, b"END", FieldType::Integer);
         self.set_info_field(template_record, b"MOTIFS", FieldType::String);
         self.set_info_field(template_record, b"STRUC", FieldType::String);
+    }
 
-        // TODO: Clean this up
-        // TODO: Consolidate logic to allow for generic FORMAT fields: i32, f32, etc...
-        let mut als = Vec::new();
-        let mut allrs = Vec::new();
-        let mut sds = Vec::new();
-        let mut mcs = Vec::new();
-        let mut mss = Vec::new();
-        let mut aps = Vec::new();
-        let mut ams = Vec::new();
-        let mut gt_vecs = Vec::new();
-        let mut alleles = Vec::new();
+    fn process_record<'a>(
+        &self,
+        record: &'a Record,
+        format_data: &mut FormatData,
+        gt_vecs: &mut Vec<Vec<Vec<GenotypeAllele>>>,
+        alleles: &mut Vec<Vec<&'a [u8]>>,
+    ) {
+        alleles.push(record.alleles().to_vec());
+        self.process_genotypes(record, gt_vecs);
+        self.process_format_fields(record, format_data);
+    }
 
-        for record in sample_records.iter() {
-            if let Some(record) = record {
-                // TODO: Allow multiple Samples per record, at the moment we just take the first element
-                alleles.push(record.alleles());
+    fn process_missing_record(
+        &self,
+        record_i: usize,
+        format_data: &mut FormatData,
+        gt_vecs: &mut Vec<Vec<Vec<GenotypeAllele>>>,
+        alleles: &mut Vec<Vec<&[u8]>>,
+    ) {
+        alleles.push(vec![]);
+        let mut tmp_gt_vec = Vec::new();
+        for _ in 0..self.readers[record_i].sample_n {
+            tmp_gt_vec.push(vec![GenotypeAllele::UnphasedMissing]);
+            PushMissingAndEnd::push_missing_and_end(&mut format_data.als);
+            PushMissingAndEnd::push_missing_and_end(&mut format_data.sds);
+            PushMissingAndEnd::push_missing_and_end(&mut format_data.aps);
+            PushMissingAndEnd::push_missing_and_end(&mut format_data.ams);
+            PushMissingAndEnd::push_missing_and_end(&mut format_data.allrs);
+            PushMissingAndEnd::push_missing_and_end(&mut format_data.mcs);
+            PushMissingAndEnd::push_missing_and_end(&mut format_data.mss);
+        }
+        gt_vecs.push(tmp_gt_vec);
+    }
 
-                // GT
-                let gt_field = record.genotypes().unwrap();
-                let gt = gt_field.get(0);
-                gt_vecs.push(gt.iter().copied().collect());
+    fn process_genotypes(&self, record: &Record, gt_vecs: &mut Vec<Vec<Vec<GenotypeAllele>>>) {
+        let gt_field = record.genotypes().unwrap();
+        let mut file_gt_vecs: Vec<Vec<GenotypeAllele>> = Vec::new();
+        for i in 0..record.sample_count() {
+            let gt = gt_field.get(i as usize);
+            file_gt_vecs.push(gt.iter().copied().collect());
+        }
+        gt_vecs.push(file_gt_vecs);
+    }
 
-                // TODO: Factor out redundancy
-                let al_field = record
-                    .format(b"AL")
-                    .integer()
-                    .expect("Error accessing FORMAT AL");
-                als.extend(al_field[0].iter().copied());
-                if al_field[0].len() == 1 {
-                    als.push(VECTOR_END_INTEGER);
+    fn merge_and_write_data(
+        &mut self,
+        format_data: FormatData,
+        gt_vecs: Vec<Vec<Vec<GenotypeAllele>>>,
+        alleles: Vec<Vec<&[u8]>>,
+    ) -> Result<()> {
+        let (out_gts, out_alleles) = merge_exact(gt_vecs, alleles)?;
+        self.writer
+            .dummy_record
+            .set_alleles(&out_alleles)
+            .map_err(|e| e.to_string())?;
+
+        let gts_new = self.flatten_genotypes(out_gts);
+        self.write_format_fields(gts_new, format_data)?;
+
+        self.writer
+            .writer
+            .write(&self.writer.dummy_record)
+            .map_err(|e| e.to_string())?;
+        self.writer.dummy_record.clear();
+        Ok(())
+    }
+
+    fn flatten_genotypes(&self, out_gts: Vec<Vec<Vec<GenotypeAllele>>>) -> Vec<i32> {
+        let mut gts_new = Vec::new();
+        for file_gts in out_gts {
+            for sample_gt in file_gts {
+                let mut converted_sample_gt: Vec<i32> =
+                    sample_gt.iter().map(|gt| i32::from(*gt)).collect();
+                if converted_sample_gt.len() == 1 {
+                    converted_sample_gt.push(VECTOR_END_INTEGER);
                 }
-
-                let allr = match record.format(b"ALLR").string() {
-                    Ok(field) => field[0].to_vec(),
-                    // Handle TRGT <=v0.3.4
-                    Err(_) => {
-                        let alci_field = record.format(b"ALCI").string().unwrap();
-                        alci_field[0].to_vec()
-                    }
-                };
-                allrs.push(allr);
-
-                let sd_field = record
-                    .format(b"SD")
-                    .integer()
-                    .expect("Error accessing FORMAT SD");
-                sds.extend(sd_field[0].iter().copied());
-                if sd_field[0].len() == 1 {
-                    sds.push(VECTOR_END_INTEGER);
-                }
-
-                let mc_field = record
-                    .format(b"MC")
-                    .string()
-                    .expect("Error acessing FORMAT MC");
-                let mc = mc_field[0].to_vec();
-                mcs.push(mc);
-
-                let ms_field = record
-                    .format(b"MS")
-                    .string()
-                    .expect("Error acessing FORMAT MS");
-                let ms = ms_field[0].to_vec();
-                mss.push(ms);
-
-                let ap_field = record
-                    .format(b"AP")
-                    .float()
-                    .expect("Error accessing FORMAT AP");
-                aps.extend(ap_field[0].iter().copied());
-                if ap_field[0].len() == 1 {
-                    aps.push(*VECTOR_END_FLOAT);
-                }
-
-                let am_field = match record.format(b"AM").float() {
-                    Ok(field) => field[0].to_vec(),
-                    // Handle TRGT <=v0.4.0
-                    Err(_) => {
-                        let int_field = record
-                            .format(b"AM")
-                            .integer()
-                            .expect("Error accessing FORMAT AM as an integer");
-                        int_field[0]
-                            .iter()
-                            .map(|&i| {
-                                // Account for missing values
-                                if i == i32::MIN {
-                                    *MISSING_FLOAT
-                                } else {
-                                    i as f32 / 255.0
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                    }
-                };
-                ams.extend(am_field.iter().copied());
-                if am_field.len() == 1 {
-                    ams.push(*VECTOR_END_FLOAT);
-                }
-            } else {
-                gt_vecs.push(vec![GenotypeAllele::UnphasedMissing]);
-                alleles.push(vec![]);
-
-                PushMissingAndEnd::push_missing_and_end(&mut als);
-                PushMissingAndEnd::push_missing_and_end(&mut sds);
-                PushMissingAndEnd::push_missing_and_end(&mut aps);
-                PushMissingAndEnd::push_missing_and_end(&mut ams);
-                PushMissingAndEnd::push_missing_and_end(&mut allrs);
-                PushMissingAndEnd::push_missing_and_end(&mut mcs);
-                PushMissingAndEnd::push_missing_and_end(&mut mss);
+                gts_new.extend(converted_sample_gt);
             }
         }
+        gts_new
+    }
 
-        // Merge alleles and genotypes
-        let (out_gts, out_alleles) = merge_exact(gt_vecs, alleles);
-        self.writer.dummy_record.set_alleles(&out_alleles).unwrap();
-
-        // Flatten to a 1D 2D representation using
-        let mut gts_new: Vec<i32> = Vec::new();
-        for sample_gt in out_gts {
-            let mut converted_sample_gt: Vec<i32> =
-                sample_gt.iter().map(|gt| i32::from(*gt)).collect();
-            if converted_sample_gt.len() == 1 {
-                converted_sample_gt.push(VECTOR_END_INTEGER);
-            }
-            gts_new.extend(converted_sample_gt);
-        }
-        //
-
+    fn write_format_fields(&mut self, gts_new: Vec<i32>, format_data: FormatData) -> Result<()> {
         self.writer
             .dummy_record
             .push_format_integer(b"GT", &gts_new)
-            .unwrap();
-
+            .map_err(|e| e.to_string())?;
         self.writer
             .dummy_record
-            .push_format_integer(b"AL", &als)
-            .unwrap();
-
+            .push_format_integer(b"AL", &format_data.als)
+            .map_err(|e| e.to_string())?;
         self.writer
             .dummy_record
-            .push_format_string(b"ALLR", &allrs)
-            .unwrap();
-
+            .push_format_string(b"ALLR", &format_data.allrs)
+            .map_err(|e| e.to_string())?;
         self.writer
             .dummy_record
-            .push_format_integer(b"SD", &sds)
-            .unwrap();
-
+            .push_format_integer(b"SD", &format_data.sds)
+            .map_err(|e| e.to_string())?;
         self.writer
             .dummy_record
-            .push_format_string(b"MC", &mcs)
-            .unwrap();
-
+            .push_format_string(b"MC", &format_data.mcs)
+            .map_err(|e| e.to_string())?;
         self.writer
             .dummy_record
-            .push_format_string(b"MS", &mss)
-            .unwrap();
-
+            .push_format_string(b"MS", &format_data.mss)
+            .map_err(|e| e.to_string())?;
         self.writer
             .dummy_record
-            .push_format_float(b"AP", &aps)
-            .unwrap();
-
+            .push_format_float(b"AP", &format_data.aps)
+            .map_err(|e| e.to_string())?;
         self.writer
             .dummy_record
-            .push_format_float(b"AM", &ams)
-            .unwrap();
-
-        self.writer.writer.write(&self.writer.dummy_record).unwrap();
-
-        self.writer.dummy_record.clear();
+            .push_format_float(b"AM", &format_data.ams)
+            .map_err(|e| e.to_string())?;
+        Ok(())
     }
 
-    fn init_heap(&mut self) -> BinaryHeap<VcfRecordWithSource> {
-        let mut heap = BinaryHeap::new();
-        for (index, reader) in self.readers.iter_mut().enumerate() {
-            if reader.advance() {
-                heap.push(VcfRecordWithSource {
-                    record: reader.current_record.clone(),
-                    reader_index: index,
-                });
-            }
+    fn process_format_fields(&self, record: &Record, format_data: &mut FormatData) {
+        self.process_integer_field(record, b"AL", &mut format_data.als);
+
+        match record.format(b"ALLR").string() {
+            Ok(_) => self.process_string_field(record, b"ALLR", &mut format_data.allrs),
+            // Handle TRGT <=v0.3.4
+            Err(_) => self.process_string_field(record, b"ALCI", &mut format_data.allrs),
         }
-        heap
+
+        self.process_integer_field(record, b"SD", &mut format_data.sds);
+        self.process_string_field(record, b"MC", &mut format_data.mcs);
+        self.process_string_field(record, b"MS", &mut format_data.mss);
+        self.process_float_field(record, b"AP", &mut format_data.aps);
+        self.process_am_field(record, &mut format_data.ams);
     }
 
-    fn update_heap(
-        &mut self,
-        heap: &mut BinaryHeap<VcfRecordWithSource>,
-        sample_records: &[Option<Record>],
-    ) {
-        for (index, record) in sample_records.iter().enumerate() {
-            if record.is_some() && self.readers[index].advance() {
-                heap.push(VcfRecordWithSource {
-                    record: self.readers[index].current_record.clone(),
-                    reader_index: index,
-                });
+    fn process_integer_field(&self, record: &Record, field_name: &[u8], values: &mut Vec<i32>) {
+        let field = record.format(field_name).integer().unwrap_or_else(|_| {
+            panic!(
+                "Error accessing FORMAT {}",
+                String::from_utf8_lossy(field_name)
+            )
+        });
+        for sample_values in field.iter() {
+            values.extend(sample_values.iter().copied());
+            if sample_values.len() <= 1 {
+                values.push(VECTOR_END_INTEGER);
             }
         }
     }
 
-    pub fn merge_variants(&mut self) {
-        let mut n = 0;
-        let mut n_processed = 0;
-
-        let mut sample_records = vec![None; self.readers.len()];
-        let mut heap = self.init_heap();
-        while let Some(min_element) = heap.pop() {
-            let min_rid = min_element.record.rid().unwrap();
-            let min_pos = min_element.record.pos();
-            sample_records[min_element.reader_index] = Some(min_element.record);
-
-            while let Some(peek_next_element) = heap.peek() {
-                if peek_next_element.record.rid().unwrap() == min_rid
-                    && peek_next_element.record.pos() == min_pos
-                {
-                    let next_element = heap.pop().unwrap();
-                    sample_records[next_element.reader_index] = Some(next_element.record);
-                } else {
-                    break;
-                }
+    fn process_float_field(&self, record: &Record, field_name: &[u8], values: &mut Vec<f32>) {
+        let field = record.format(field_name).float().unwrap_or_else(|_| {
+            panic!(
+                "Error accessing FORMAT {}",
+                String::from_utf8_lossy(field_name)
+            )
+        });
+        for sample_values in field.iter() {
+            values.extend(sample_values.iter().copied());
+            if sample_values.len() <= 1 {
+                values.push(*VECTOR_END_FLOAT);
             }
-
-            if n >= self.skip_n {
-                log::info!("Processing: {}:{}", min_rid, min_pos);
-                if self.needs_padding {
-                    let padding_base = self.get_padding_base(
-                        min_rid,
-                        min_pos,
-                        &self.readers[min_element.reader_index].header,
-                    );
-                    self.add_padding_base(&mut sample_records, padding_base);
-                }
-
-                self.merge_variant(&sample_records);
-                n_processed += 1;
-                if n_processed >= self.process_n {
-                    break;
-                }
-            }
-            n += 1;
-
-            self.update_heap(&mut heap, &sample_records);
-            sample_records.fill(None);
         }
     }
 
-    fn add_padding_base(&mut self, sample_records: &mut [Option<Record>], padding_base: Vec<u8>) {
-        for (index, record) in sample_records.iter_mut().enumerate() {
-            if self.readers[index].version.major < Version::new(1, 0, 0).major {
-                if let Some(record) = record {
-                    let al_0 = record
-                        .format(b"AL")
-                        .integer()
-                        .expect("Error accessing FORMAT AL")[0]
+    fn process_string_field(&self, record: &Record, field_name: &[u8], values: &mut Vec<Vec<u8>>) {
+        let field = record.format(field_name).string().unwrap_or_else(|_| {
+            panic!(
+                "Error accessing FORMAT {}",
+                String::from_utf8_lossy(field_name)
+            )
+        });
+        for sample_value in field.iter() {
+            values.push(sample_value.to_vec());
+        }
+    }
+
+    fn process_am_field(&self, record: &Record, ams: &mut Vec<f32>) {
+        let am_field = record.format(b"AM");
+        match am_field.float() {
+            Ok(_) => self.process_float_field(record, b"AM", ams),
+            // Handle TRGT <=v0.4.0
+            Err(_) => {
+                let int_field = record
+                    .format(b"AM")
+                    .integer()
+                    .unwrap_or_else(|_| panic!("Error accessing FORMAT AM as an integer"));
+                for sample_am in int_field.iter() {
+                    let converted_am: Vec<f32> = sample_am
                         .iter()
-                        .min()
-                        .cloned()
-                        .unwrap();
-                    // Zero-length allele records do not need to be updated
-                    if al_0 != 0 {
-                        let new_alleles: Vec<Vec<u8>> = record
-                            .alleles()
-                            .iter()
-                            .map(|allele| {
-                                let mut new_allele = padding_base.to_vec();
-                                new_allele.extend_from_slice(allele);
-                                new_allele
-                            })
-                            .collect();
-                        let new_alleles_refs: Vec<&[u8]> =
-                            new_alleles.iter().map(|a| a.as_slice()).collect();
-                        record
-                            .set_alleles(&new_alleles_refs)
-                            .expect("Failed to set alleles")
+                        .map(|&i| {
+                            if i == i32::MIN {
+                                *MISSING_FLOAT
+                            } else {
+                                i as f32 / 255.0
+                            }
+                        })
+                        .collect();
+                    ams.extend(converted_am);
+                    if sample_am.len() <= 1 {
+                        ams.push(*VECTOR_END_FLOAT);
                     }
                 }
             }
         }
-    }
-
-    fn get_padding_base(&self, rid: u32, pos: i64, header: &HeaderView) -> Vec<u8> {
-        let chrom = header.rid2name(rid).unwrap();
-        let chrom_str = std::str::from_utf8(chrom).expect("Invalid UTF-8 sequence");
-        self.genome_reader
-            .fetch_seq(chrom_str, pos as usize, pos as usize)
-            .map(|seq| seq.to_vec())
-            .ok()
-            .unwrap()
     }
 }
 
@@ -545,7 +683,7 @@ mod tests {
         record3.set_pos(50);
 
         let mut record4 = reader.empty_record();
-        record4.set_rid(Some(10));
+        record4.set_rid(Some(1));
         record4.set_pos(99);
 
         let mut heap = BinaryHeap::new();
@@ -572,14 +710,14 @@ mod tests {
 
         let r = heap.pop().unwrap();
         assert_eq!(r.record.rid(), Some(1));
+        assert_eq!(r.record.pos(), 99);
+
+        let r = heap.pop().unwrap();
+        assert_eq!(r.record.rid(), Some(1));
         assert_eq!(r.record.pos(), 100);
 
         let r = heap.pop().unwrap();
         assert_eq!(r.record.rid(), Some(1));
         assert_eq!(r.record.pos(), 2000);
-
-        let r = heap.pop().unwrap();
-        assert_eq!(r.record.rid(), Some(10));
-        assert_eq!(r.record.pos(), 99);
     }
 }
