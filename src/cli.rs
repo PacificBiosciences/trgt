@@ -79,7 +79,7 @@ pub struct MergeArgs {
     #[clap(value_name = "FILE")]
     #[clap(help = "Write output to a file [standard output]")]
     #[arg(value_parser = check_prefix_path)]
-    pub output: Option<String>,
+    pub output: Option<PathBuf>,
 
     #[clap(help_heading("Advanced"))]
     #[clap(short = 'O')]
@@ -184,7 +184,7 @@ pub struct GenotypeArgs {
     #[clap(help = "Prefix for output files")]
     #[clap(value_name = "OUTPUT_PREFIX")]
     #[arg(value_parser = check_prefix_path)]
-    pub output_prefix: String,
+    pub output_prefix: PathBuf,
 
     #[clap(long = "karyotype")]
     #[clap(short = 'k')]
@@ -324,7 +324,7 @@ pub struct PlotArgs {
     #[clap(help = "Output image path")]
     #[clap(value_name = "IMAGE")]
     #[arg(value_parser = check_image_path)]
-    pub output_path: String,
+    pub output_path: PathBuf,
 
     #[clap(help_heading("Plotting"))]
     #[clap(long = "plot-type")]
@@ -348,6 +348,12 @@ pub struct PlotArgs {
     #[clap(help = "Length of flanking regions")]
     #[clap(default_value = "50")]
     pub flank_len: usize,
+
+    #[clap(help_heading("Advanced"))]
+    #[clap(long = "max-allele-reads")]
+    #[clap(value_name = "MAX_READS")]
+    #[clap(help = "Max number of reads per allele to plot")]
+    pub max_allele_reads: Option<usize>,
 }
 
 #[derive(Parser, Debug)]
@@ -410,17 +416,17 @@ pub fn init_verbose(args: &Cli) {
         .init();
 }
 
-fn check_prefix_path(s: &str) -> Result<String> {
+fn check_prefix_path(s: &str) -> Result<PathBuf> {
     let path = Path::new(s);
     if let Some(parent_dir) = path.parent() {
         if !parent_dir.as_os_str().is_empty() && !parent_dir.exists() {
             return Err(format!("Path does not exist: {}", parent_dir.display()));
         }
     }
-    Ok(s.to_string())
+    Ok(PathBuf::from(s))
 }
 
-fn check_image_path(s: &str) -> Result<String> {
+fn check_image_path(s: &str) -> Result<PathBuf> {
     let prefix_check = check_prefix_path(s)?;
     let path = Path::new(s);
     match path.extension().and_then(|ext| ext.to_str()) {

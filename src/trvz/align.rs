@@ -1,88 +1,39 @@
-use crate::trvz::{
-    locus::{Allele, Locus},
-    read::Read,
-};
-use bio::alignment::{pairwise::Aligner, Alignment};
+use super::read::Betas;
 
 #[derive(Debug, Clone)]
-pub struct AlignInfo {
-    pub seq: String,
-    pub meth: Option<Vec<u8>>,
-    pub align: Alignment,
-    pub allele_index: usize,
+pub struct AlleleAlign {
+    pub seq: (Align, Vec<MotifBound>),
+    pub reads: Vec<(Align, Betas)>,
 }
 
-pub fn align_reads(genotype: &Vec<Allele>, reads: Vec<Read>) -> Vec<AlignInfo> {
-    let likely_max_len = get_longest_allele(genotype) + 50;
-    let mut aligner = get_aligner(likely_max_len);
-    let mut align_infos = Vec::new();
-
-    for read in reads {
-        let i = read.allele as usize;
-        if i < genotype.len() {
-            align_infos.push(AlignInfo {
-                align: aligner.global(read.seq.as_bytes(), genotype[i].seq.as_bytes()),
-                seq: read.seq,
-                meth: read.meth,
-                allele_index: i,
-            });
-        }
-    }
-
-    align_infos
+#[derive(Debug, Clone)]
+pub struct MotifBound {
+    pub start: usize,
+    pub end: usize,
+    pub motif_index: usize,
 }
 
-pub fn align_to_flanks(locus: &Locus, reads: Vec<Read>) -> Vec<AlignInfo> {
-    let max_read_len = reads.iter().map(|r| r.seq.len()).max().unwrap();
-    let flank_len = locus.left_flank.len();
+pub type Align = Vec<AlignSeg>;
 
-    let mut aligns = Vec::new();
-    let mut aligner = get_aligner(max_read_len);
-    for read in reads {
-        let mut ref_seq = locus.left_flank[locus.left_flank.len() - flank_len..].to_string();
-        ref_seq += &read.seq[read.left_flank..read.seq.len() - read.right_flank];
-        ref_seq += &locus.right_flank[..flank_len];
-
-        let align = aligner.global(read.seq.as_bytes(), ref_seq.as_bytes());
-
-        aligns.push(AlignInfo {
-            seq: read.seq,
-            meth: read.meth,
-            align,
-            allele_index: 0,
-        });
-    }
-    aligns
+#[derive(Debug, Clone)]
+pub struct AlignSeg {
+    pub width: usize,
+    pub op: AlignOp,
+    pub seg_type: SegType,
 }
 
-type ScoreFunc = fn(u8, u8) -> i32;
-
-fn score(a: u8, b: u8) -> i32 {
-    if a == b {
-        1i32
-    } else {
-        -1i32
-    }
+#[derive(Debug, Clone, PartialEq)]
+pub enum AlignOp {
+    Match,
+    Subst,
+    Ins,
+    Del,
 }
 
-fn get_aligner<'a>(likely_max_len: usize) -> Aligner<&'a ScoreFunc> {
-    Aligner::with_capacity(
-        likely_max_len,
-        likely_max_len,
-        -5,
-        -1,
-        &(score as ScoreFunc),
-    )
-}
-
-fn get_longest_allele(genotype: &Vec<Allele>) -> usize {
-    let mut max_len = 0;
-
-    for allele in genotype {
-        if allele.seq.len() > max_len {
-            max_len = allele.seq.len();
-        }
-    }
-
-    max_len
+#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
+pub enum SegType {
+    // The integer is the motif index or motifs.len() for unsegmented regions
+    Tr(usize),
+    LeftFlank,
+    RightFlank,
 }

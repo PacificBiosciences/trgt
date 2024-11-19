@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::utils::Result;
 use rust_htslib::bcf;
 
@@ -22,11 +24,11 @@ impl VcfWriter {
     pub fn new(
         header: &bcf::Header,
         output_type: &Option<OutputType>,
-        output: Option<&String>,
+        output: Option<&PathBuf>,
     ) -> Result<Self> {
         let output_type = match (output_type, output) {
             (Some(output_type), _) => output_type.clone(),
-            (None, Some(path)) => Self::infer_output_type_from_extension(path)?,
+            (None, Some(path)) => Self::infer_output_type_from_extension(path.to_str().unwrap())?,
             (None, None) => OutputType::Vcf {
                 is_uncompressed: true,
                 level: None,

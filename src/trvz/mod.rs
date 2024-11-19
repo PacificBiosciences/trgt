@@ -1,11 +1,11 @@
 pub mod align;
-pub mod genotype_plot;
+pub mod align_allele;
+pub mod align_consensus;
+pub mod align_reads;
+pub mod allele_plot;
+pub mod color;
 pub mod input;
 pub mod locus;
-pub mod pdf;
-pub mod pipe_plot;
-pub mod png;
 pub mod read;
 pub mod struc;
-pub mod svg;
 pub mod waterfall_plot;

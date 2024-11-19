@@ -14,21 +14,12 @@ pub struct Locus {
     pub region: GenomicRegion,
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub enum BaseLabel {
-    Match,
-    Mismatch,
-    NoMatch,
-    Skip,
-    MotifBound,
-}
-
 #[derive(Debug)]
 pub struct Allele {
     pub seq: String,
     pub region_labels: Vec<RegionLabel>,
     pub flank_labels: Vec<RegionLabel>,
-    pub base_labels: Vec<BaseLabel>,
+    //pub base_labels: Vec<BaseLabel>,
 }
 
 fn get_flanks(

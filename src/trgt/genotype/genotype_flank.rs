@@ -106,6 +106,11 @@ fn get_trs_with_clustering<'a>(
         .unwrap()
         .0;
 
+    // No SNPs were called since both haplotypes are identical
+    if top_gt.0 == top_gt.1 {
+        return None;
+    }
+
     let mut allele_assignment = Vec::new();
     let mut assignment_tie_breaker = 1;
     let mut trs_by_allele = [Vec::new(), Vec::new()];

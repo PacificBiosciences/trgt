@@ -1,23 +1,15 @@
-use crate::hmm::{build_hmm, get_events, Hmm, HmmEvent};
-use crate::trvz::{
-    locus::{self, Allele, BaseLabel, Locus},
-    read::Read,
-    struc::RegionLabel,
-};
+use crate::trvz::locus::{self, Locus};
 use crate::utils::Result;
 use itertools::Itertools;
-use rust_htslib::{
-    bam::{self, record::Aux, Read as BamRead},
-    bcf::{self, record::GenotypeAllele::UnphasedMissing, Read as BcfRead, Record},
-    faidx,
-};
-use std::{
-    io::{BufRead, BufReader, Read as ioRead},
-    path::PathBuf,
-    str,
-};
+use rust_htslib::bam::{self, record::Aux, Read as BamRead};
+use rust_htslib::bcf::{self, record::GenotypeAllele::UnphasedMissing, Read as BcfRead, Record};
+use rust_htslib::faidx;
+use std::collections::HashSet;
+use std::io::{BufRead, BufReader, Read as ioRead};
+use std::path::PathBuf;
+use std::str;
 
-type RegionLabels = Vec<RegionLabel>;
+use super::read::{Beta, Betas, Read};
 
 #[derive(Debug)]
 pub struct Span {
@@ -26,13 +18,16 @@ pub struct Span {
     pub end: usize,
 }
 
-pub fn get_genotype(bcf_path: &PathBuf, locus: &Locus) -> Result<Vec<Allele>> {
+pub fn get_alleles(bcf_path: &PathBuf, locus: &Locus) -> Result<Vec<String>> {
     let mut bcf = bcf::Reader::from_path(bcf_path).unwrap();
     for record in bcf.records() {
-        let record = record.unwrap();
+        let record = record.map_err(|e| e.to_string())?;
 
         let tr_id = record.info(b"TRID").string().unwrap().unwrap();
-        let tr_id = str::from_utf8(tr_id.to_vec()[0]).unwrap();
+        let tr_id = tr_id
+            .iter()
+            .map(|elem| str::from_utf8(elem).unwrap())
+            .join(",");
 
         if tr_id != locus.id {
             continue;
@@ -43,22 +38,8 @@ pub fn get_genotype(bcf_path: &PathBuf, locus: &Locus) -> Result<Vec<Allele>> {
             return Err(format!("Missing genotype for TRID={}", tr_id));
         }
 
-        let allele_seqs = get_allele_seqs(locus, &record);
-        let region_labels_by_allele = get_region_labels(locus, &allele_seqs, &record);
-        let flank_labels_by_allele = get_flank_labels(locus, &region_labels_by_allele);
-        let base_labels_by_allele = label_with_hmm(locus, &allele_seqs);
-
-        let mut genotype = Vec::new();
-        for (index, seq) in allele_seqs.into_iter().enumerate() {
-            genotype.push(Allele {
-                seq,
-                region_labels: region_labels_by_allele[index].clone(),
-                flank_labels: flank_labels_by_allele[index].clone(),
-                base_labels: base_labels_by_allele[index].clone(),
-            });
-        }
-
-        return Ok(genotype);
+        let alleles = get_allele_seqs(locus, &record);
+        return Ok(alleles);
     }
     Err(format!("TRID={} missing", &locus.id))
 }
@@ -79,7 +60,11 @@ pub fn get_locus(
     Err(format!("Unable to find locus {}", tr_id))
 }
 
-pub fn get_reads(bam_path: &PathBuf, locus: &Locus) -> Result<Vec<Read>> {
+pub fn get_reads(
+    bam_path: &PathBuf,
+    locus: &Locus,
+    max_allele_reads: Option<usize>,
+) -> Result<Vec<Read>> {
     let mut reads = bam::IndexedReader::from_path(bam_path).unwrap();
     // This assumes that TRGT outputs flanks shorter than 1Kbps in length. We may want
     // to implement a more flexible mechanism for handling flank lengths here and elsewhere.
@@ -108,22 +93,7 @@ pub fn get_reads(bam_path: &PathBuf, locus: &Locus) -> Result<Vec<Read>> {
             continue;
         }
 
-        let meth = match read.aux(b"MC") {
-            Ok(Aux::ArrayU8(value)) => {
-                if !value.is_empty() {
-                    Some(value.iter().collect::<Vec<u8>>())
-                } else {
-                    None
-                }
-            }
-            Ok(_) => {
-                return Err(format!(
-                    "malformed MC tag in read {:?}.",
-                    String::from_utf8(read.qname().to_vec()).unwrap()
-                ))
-            }
-            Err(_) => None,
-        };
+        let meth = parse_meth(&read, &seq)?;
 
         let allele = match read.aux(b"AL") {
             Ok(Aux::I32(value)) => value,
@@ -135,7 +105,7 @@ pub fn get_reads(bam_path: &PathBuf, locus: &Locus) -> Result<Vec<Read>> {
             }
             Err(_) => {
                 return Err(format!(
-                    "malformatted read. Expected AL tag not found: {:?}",
+                    "Malformed read. Expected AL tag not found: {:?}",
                     String::from_utf8(read.qname().to_vec()).unwrap()
                 ))
             }
@@ -155,13 +125,13 @@ pub fn get_reads(bam_path: &PathBuf, locus: &Locus) -> Result<Vec<Read>> {
             }
             Ok(_) => {
                 return Err(format!(
-                    "malformatted FL tag in read {:?}.",
+                    "Malformed FL tag in read {:?}.",
                     String::from_utf8(read.qname().to_vec()).unwrap()
                 ))
             }
             Err(_) => {
                 return Err(format!(
-                    "malformatted read. Expected FL tag not found: {:?}",
+                    "Malformed read. Expected FL tag not found: {:?}",
                     String::from_utf8(read.qname().to_vec()).unwrap()
                 ))
             }
@@ -172,9 +142,34 @@ pub fn get_reads(bam_path: &PathBuf, locus: &Locus) -> Result<Vec<Read>> {
             left_flank,
             right_flank,
             allele,
-            meth,
+            betas: meth,
         });
     }
+    let seqs = if let Some(max_reads) = max_allele_reads {
+        let unique_alleles: Vec<i32> = seqs
+            .iter()
+            .map(|x| x.allele)
+            .collect::<HashSet<i32>>()
+            .into_iter()
+            .collect();
+        unique_alleles
+            .into_iter()
+            .map(|allele| {
+                let num_allele_reads = seqs.iter().filter(|x| x.allele == allele).count();
+
+                // GS: this only works if spanning.bam is sorted by TR length
+                let step = std::cmp::max(1_usize, num_allele_reads / max_reads);
+                seqs.clone()
+                    .into_iter()
+                    .filter(|seq| seq.allele == allele)
+                    .step_by(step)
+                    .take(max_reads)
+                    .collect()
+            })
+            .concat()
+    } else {
+        seqs
+    };
 
     Ok(seqs)
 }
@@ -198,130 +193,46 @@ fn get_allele_seqs(locus: &Locus, record: &Record) -> Vec<String> {
     alleles
 }
 
-fn get_region_labels(locus: &Locus, alleles: &[String], record: &Record) -> Vec<RegionLabels> {
-    let lf_len = locus.left_flank.len();
-    let rf_len = locus.right_flank.len();
-
-    let mut labels_by_hap = Vec::new();
-    let ms_field = record.format(b"MS").string().unwrap();
-    let ms_field = str::from_utf8(ms_field.to_vec()[0]).unwrap();
-    for (allele_index, spans) in ms_field.split(',').enumerate() {
-        let allele_len = alleles[allele_index].len();
-        if spans == "." {
-            let tr_start = lf_len;
-            let tr_end = allele_len - rf_len;
-
-            labels_by_hap.push(vec![
-                RegionLabel::Flank(0, tr_start),
-                RegionLabel::Other(tr_start, tr_end),
-                RegionLabel::Flank(tr_end, allele_len),
-            ]);
-            continue;
-        }
-        let mut labels = vec![RegionLabel::Flank(0, locus.left_flank.len())];
-        let mut last_seg_end = locus.left_flank.len();
-        for span in spans.split('_') {
-            let (motif_index, start, end) = span
-                .trim_end_matches(')')
-                .split(&['(', '-'])
-                .map(|s| s.parse::<usize>().unwrap())
-                .collect_tuple()
-                .unwrap();
-            let motif = locus.motifs[motif_index].clone();
-            let start = start + locus.left_flank.len();
-            let end = end + locus.left_flank.len();
-
-            if start != last_seg_end {
-                labels.push(RegionLabel::Seq(last_seg_end, start));
+fn parse_meth(read: &bam::Record, seq: &str) -> Result<Betas> {
+    let values = match read.aux(b"MC") {
+        Ok(Aux::ArrayU8(value)) => {
+            if !value.is_empty() {
+                value.iter().collect::<Vec<u8>>()
+            } else {
+                return Ok(Vec::new());
             }
-            labels.push(RegionLabel::Tr(start, end, motif));
-            last_seg_end = end;
         }
-
-        if last_seg_end != allele_len - rf_len {
-            let seg_end = allele_len - rf_len;
-            labels.push(RegionLabel::Seq(last_seg_end, seg_end));
-            last_seg_end = seg_end;
+        Ok(_) => {
+            let read_name = String::from_utf8(read.qname().to_vec()).unwrap();
+            return Err(format!("Bad MC tag in read {read_name}"));
         }
+        Err(_) => return Ok(Vec::new()),
+    };
 
-        labels.push(RegionLabel::Flank(
-            last_seg_end,
-            last_seg_end + locus.right_flank.len(),
-        ));
-        labels_by_hap.push(labels);
-    }
-
-    labels_by_hap
-}
-
-fn get_flank_labels(locus: &Locus, all_labels_by_allele: &Vec<RegionLabels>) -> Vec<RegionLabels> {
-    let mut flank_labels_by_allele = Vec::new();
-    for all_labels in all_labels_by_allele {
-        let tr_len = all_labels
-            .iter()
-            .map(|l| match l {
-                RegionLabel::Flank(_, _) => 0,
-                RegionLabel::Other(start, end) => end - start,
-                RegionLabel::Seq(start, end) => end - start,
-                RegionLabel::Tr(start, end, _) => end - start,
-            })
-            .sum::<usize>();
-
-        let tr_start = locus.left_flank.len();
-        let tr_end = tr_start + tr_len;
-        let allele_end = tr_end + locus.right_flank.len();
-
-        flank_labels_by_allele.push(vec![
-            RegionLabel::Flank(0, tr_start),
-            RegionLabel::Other(tr_start, tr_end),
-            RegionLabel::Flank(tr_end, allele_end),
-        ]);
-    }
-    flank_labels_by_allele
-}
-
-fn label_with_hmm(locus: &Locus, alleles: &[String]) -> Vec<Vec<BaseLabel>> {
-    let motifs = locus
-        .motifs
-        .iter()
-        .map(|m| m.as_bytes().to_vec())
-        .collect_vec();
-    let hmm = build_hmm(&motifs);
-
-    let mut labels_by_allele = Vec::new();
-
-    for allele in alleles {
-        let query = &allele[locus.left_flank.len()..allele.len() - locus.right_flank.len()];
-        let mut labels = vec![BaseLabel::Match; locus.left_flank.len()];
-        let states = hmm.label(query);
-        labels.extend(get_base_labels(
-            &locus.motifs,
-            &hmm,
-            &states,
-            query.as_bytes(),
-        ));
-        labels.extend(vec![BaseLabel::Match; locus.right_flank.len()]);
-        labels_by_allele.push(labels);
-    }
-
-    labels_by_allele
-}
-
-fn get_base_labels(motifs: &[String], hmm: &Hmm, states: &[usize], query: &[u8]) -> Vec<BaseLabel> {
-    let motifs = motifs.iter().map(|m| m.as_bytes().to_vec()).collect_vec();
-    let events = get_events(hmm, &motifs, states, query);
-
-    let mut base_labels = Vec::new();
-    for event in events {
-        match event {
-            HmmEvent::Match | HmmEvent::Skip => base_labels.push(BaseLabel::Match),
-            HmmEvent::Ins => base_labels.push(BaseLabel::NoMatch),
-            HmmEvent::Del => base_labels.push(BaseLabel::Skip),
-            HmmEvent::Mismatch => base_labels.push(BaseLabel::Mismatch),
-            HmmEvent::MotifStart => base_labels.push(BaseLabel::MotifBound),
-            HmmEvent::Trans | HmmEvent::MotifEnd => {}
+    let mut betas = Vec::new();
+    let mut cpg_count = 0;
+    for pos in 0..seq.len() {
+        let is_cpg = pos + 1 < seq.len() && &seq[pos..pos + 2] == "CG";
+        if is_cpg {
+            if cpg_count == values.len() {
+                let read_name = String::from_utf8(read.qname().to_vec()).unwrap();
+                return Err(format!("Bad MC tag in read {read_name}"));
+            }
+            let level = values[cpg_count] as f64 / 255.0;
+            let beta = Beta { pos, value: level };
+            betas.push(beta);
+            cpg_count += 1;
         }
     }
-    base_labels.push(BaseLabel::MotifBound);
-    base_labels
+
+    let all_cpgs_present = cpg_count == values.len();
+    let last_cpg_split =
+        seq.bytes().last().unwrap_or(b'X') == b'C' && cpg_count + 1 == values.len();
+
+    if !(all_cpgs_present || last_cpg_split) {
+        let read_name = String::from_utf8(read.qname().to_vec()).unwrap();
+        return Err(format!("Bad MC tag in read {read_name}"));
+    }
+
+    Ok(betas)
 }

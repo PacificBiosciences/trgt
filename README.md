@@ -136,8 +136,12 @@ tandem repeats at genome scale. 2024](https://www.nature.com/articles/s41587-023
     - Merging now skips and logs problematic loci by default. Use the `--quit-on-errors` flag to terminate on errors. Statistics are logged post-merge, including counts of failed and skipped TRs.
   - `trgt validate`
     - Always outputs statistics directly to stdout and stderr instead of logging them.
-  - Bug fix: 
+  - Bug fix:
     - Resolved issue with handling bgzip-compressed BED files.
+- 1.3.0
+  - Plotting code has been refactored as we prepare to revamp repeat visualizations
+  - The maximum number of reads per allele to plot can now be specified by `--max-allele-reads`
+  - bugfix: repeat identifiers are now permitted to contain commas
 
 ### DISCLAIMER
 

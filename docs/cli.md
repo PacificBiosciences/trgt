@@ -59,6 +59,7 @@ Plotting:
 
 Advanced:
 - `--flank-len <FLANK_LEN>` Length of flanking regions [default: 50].
+- `--max-allele-reads <MAX_READS>` Max number of reads per allele to plot
 
 ## Merge command-line
 
