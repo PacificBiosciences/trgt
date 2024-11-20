@@ -1,6 +1,6 @@
 use crate::{
     merge::vcf_writer::OutputType,
-    utils::{Genotyper, Result, TrgtScoring},
+    utils::{Genotyper, Result, TrgtPreset, TrgtScoring},
 };
 use chrono::Datelike;
 use clap::{ArgAction, ArgGroup, Parser, Subcommand};
@@ -150,7 +150,7 @@ pub struct MergeArgs {
     pub contigs: Option<Vec<String>>,
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(group(ArgGroup::new("genotype")))]
 #[command(arg_required_else_help(true))]
 pub struct GenotypeArgs {
@@ -201,6 +201,12 @@ pub struct GenotypeArgs {
     #[arg(value_parser = threads_in_range)]
     pub num_threads: usize,
 
+    #[clap(long = "preset")]
+    #[clap(value_name = "PRESET")]
+    #[clap(help = "Parameter preset (wgs or targeted)")]
+    #[clap(default_value = "wgs")]
+    pub preset: TrgtPreset,
+
     #[clap(help_heading("Advanced"))]
     #[clap(long = "sample-name")]
     #[clap(value_name = "SAMPLE_NAME")]
@@ -214,8 +220,10 @@ pub struct GenotypeArgs {
     #[clap(value_name = "GENOTYPER")]
     #[clap(help = "Genotyping algorithm (size or cluster)")]
     #[clap(default_value = "size")]
+    #[clap(default_value_if("preset", "targeted", "cluster"))]
     pub genotyper: Genotyper,
 
+    #[clap(hide = true)]
     #[clap(help_heading("Advanced"))]
     #[clap(long = "aln-scoring")]
     #[clap(value_name = "SCORING")]
@@ -223,14 +231,17 @@ pub struct GenotypeArgs {
         help = "Scoring function to align to flanks (non-negative values): MATCH,MISM,GAPO,GAPE,KMERLEN,BANDWIDTH"
     )]
     #[clap(default_value = "1,1,5,1,8,6")]
+    #[clap(default_value_if("preset", "targeted", "1,1,0,1,1,5000"))]
     #[arg(value_parser = scoring_from_string)]
     pub aln_scoring: TrgtScoring,
 
+    #[clap(hide = true)]
     #[clap(help_heading("Advanced"))]
     #[clap(long = "min-flank-id-frac")]
     #[clap(value_name = "PERC")]
     #[clap(help = "Minimum fraction of matches in a flank sequence to consider it 'found'")]
     #[clap(default_value = "0.7")]
+    #[clap(default_value_if("preset", "targeted", "0.8"))]
     #[arg(value_parser = ensure_unit_float)]
     pub min_flank_id_frac: f64,
 
@@ -239,6 +250,7 @@ pub struct GenotypeArgs {
     #[clap(value_name = "FLANK_LEN")]
     #[clap(help = "Minimum length of the flanking sequence")]
     #[clap(default_value = "250")]
+    #[clap(default_value_if("preset", "targeted", "200"))]
     pub flank_len: usize,
 
     #[clap(help_heading("Advanced"))]
@@ -254,11 +266,13 @@ pub struct GenotypeArgs {
     #[clap(help = "Keep flank length fixed")]
     pub fixed_flanks: bool,
 
+    #[clap(hide = true)]
     #[clap(help_heading("Advanced"))]
     #[clap(long = "min-read-quality")]
     #[clap(value_name = "MIN_RQ")]
     #[clap(help = "Minimum HiFi rq value required to use a read for genotyping")]
     #[clap(default_value = "0.98")]
+    #[clap(default_value_if("preset", "targeted", "-1.0"))]
     // #[arg(value_parser = ensure_unit_float)]
     pub min_hifi_read_qual: f64,
 
@@ -272,6 +286,7 @@ pub struct GenotypeArgs {
     #[clap(value_name = "MAX_DEPTH")]
     #[clap(help = "Maximum locus depth")]
     #[clap(default_value = "250")]
+    #[clap(default_value_if("preset", "targeted", "10000"))]
     pub max_depth: usize,
 }
 

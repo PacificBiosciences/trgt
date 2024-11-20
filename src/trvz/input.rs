@@ -171,6 +171,10 @@ pub fn get_reads(
         seqs
     };
 
+    if seqs.is_empty() {
+        return Err(format!("No reads found for TRID={}", locus.id));
+    }
+
     Ok(seqs)
 }
 

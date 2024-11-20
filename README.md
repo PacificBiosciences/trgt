@@ -142,6 +142,10 @@ tandem repeats at genome scale. 2024](https://www.nature.com/articles/s41587-023
   - Plotting code has been refactored as we prepare to revamp repeat visualizations
   - The maximum number of reads per allele to plot can now be specified by `--max-allele-reads`
   - bugfix: repeat identifiers are now permitted to contain commas
+- 1.4.0
+  - Parameters appropriate for targeted sequencing can now be set with `--preset targeted` option
+  - Waterfall plots no longer panic when there are no reads in a locus
+  - Algorithmic changes to `--genotyper cluster` allow fewer reads to be assigned to an allele; this may result in minor changes to consensus sequence and read assignment
 
 ### DISCLAIMER
 

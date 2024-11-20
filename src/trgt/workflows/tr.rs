@@ -66,10 +66,7 @@ pub fn analyze(
 
     let (mut gt, mut allele_seqs, mut classification) = match locus.genotyper {
         Genotyper::Size => genotype_size::genotype(locus.ploidy, &trs),
-        Genotyper::Cluster => {
-            let spanning = reads.iter().map(|r| &r.bases[..]).collect_vec();
-            genotype_cluster::genotype(locus.ploidy, &spanning, &trs)
-        }
+        Genotyper::Cluster => genotype_cluster::genotype(locus.ploidy, &trs),
     };
 
     // Attempt flank re-genotyping only if alleles have similar length
@@ -404,11 +401,11 @@ fn filter_impure_trs(
     spans: &[(usize, usize)],
     rq_cutoff: f64,
 ) -> (Vec<HiFiRead>, Vec<(usize, usize)>) {
-    let max_filter = std::cmp::max(1_usize, (0.02 * (reads.len() as f64)).round() as usize);
+    let max_filter = std::cmp::max(1_usize, (0.1 * (reads.len() as f64)).round() as usize);
     let mut num_filtered = 0;
     let mut hmm = Hmm::new(0);
     let mut motifs = Vec::new();
-    const PURITY_CUTOFF: f64 = 0.7;
+    const PURITY_CUTOFF: f64 = 0.9;
     izip!(reads, spans)
         .filter(|(read, span)| {
             if num_filtered == max_filter {

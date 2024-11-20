@@ -24,16 +24,14 @@ Options:
   of HiFi reads overlapping the repeats (`<OUTPUT_PREFIX>.spanning.bam`).
 - `-k, --karyotype <KARYOTYPE>` Sample karyotype (XX or XY) [default: XX].
 - `-t, --threads <THREADS>` Number of threads [default: 1].
+      `--preset <PRESET> ` Parameter preset (wgs or targeted)
 
 Advanced:
 - `--sample-name <SAMPLE_NAME>` Sample name. If it is not provided, the sample name is extracted from the input BAM or file stem.
 - `--genotyper <GENOTYPER>` Genotyping algorithm (size or cluster), [default: size].
-- `--aln-scoring <SCORING>` Scoring function to align to flanks (non-negative values): MATCH,MISM,GAPO,GAPE,KMERLEN,BANDWIDTH.
-- `--min-flank-id-frac <PERC>`  Minimum fraction of matches in a flank sequence to consider it 'found'.
 - `--flank-len <FLANK_LEN>` Minimum length of the flanking sequence [default: 250].
 - `--output-flank-len <FLANK_LEN>` Length of flanking sequence to report on output [default: 50].
 - `--fixed-flanks` Keep flank length fixed.
-- `--min-read-quality <MIN_RQ>` Minimum HiFi rq value required to use a read for genotyping [default: 0.98].
 - `--disable-bam-output` Disable BAM output.
 - `--max-depth <MAX_DEPTH>` Maximum locus depth [default: 250].
 

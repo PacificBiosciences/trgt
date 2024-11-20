@@ -36,7 +36,6 @@ const CHANNEL_BUFFER_SIZE: usize = 2048;
 
 pub fn trgt(args: GenotypeArgs) -> Result<()> {
     let start_timer = time::Instant::now();
-
     let karyotype = Karyotype::new(&args.karyotype)?;
 
     let bam_header = get_bam_header(&args.reads_path)?;
