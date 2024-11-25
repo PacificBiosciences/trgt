@@ -146,6 +146,8 @@ tandem repeats at genome scale. 2024](https://www.nature.com/articles/s41587-023
   - Parameters appropriate for targeted sequencing can now be set with `--preset targeted` option
   - Waterfall plots no longer panic when there are no reads in a locus
   - Algorithmic changes to `--genotyper cluster` allow fewer reads to be assigned to an allele; this may result in minor changes to consensus sequence and read assignment
+- 1.4.1
+  - Bug fix: corrected the type of the rq tag in BAM output
 
 ### DISCLAIMER
 

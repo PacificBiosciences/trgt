@@ -113,8 +113,9 @@ impl BamWriter {
             let tr_tag = Aux::String(&locus.id);
             rec.push_aux(b"TR", tr_tag).unwrap();
 
-            rec.push_aux(b"rq", Aux::Double(read.read_qual.unwrap_or(-1.0)))
+            rec.push_aux(b"rq", Aux::Float(read.read_qual.unwrap_or(-1.0) as f32))
                 .unwrap();
+
             if let Some(meth) = &read.meth {
                 let mc_tag = Aux::ArrayU8(meth.into());
                 rec.push_aux(b"MC", mc_tag).unwrap();
