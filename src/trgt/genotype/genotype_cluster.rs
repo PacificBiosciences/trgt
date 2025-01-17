@@ -1,7 +1,7 @@
 use super::{consensus, Gt, TrSize};
 use crate::utils::{align, Ploidy};
 use arrayvec::ArrayVec;
-use bio::alignment::distance::simd::bounded_levenshtein;
+use bio::alignment::distance::simd::levenshtein;
 use itertools::Itertools;
 use kodama::{linkage, Method};
 
@@ -228,11 +228,12 @@ fn get_ci(seqs: &[&str]) -> (usize, usize) {
 
 fn get_dist(seq1: &[u8], seq2: &[u8]) -> f64 {
     // we'll skip ED in cases we already know it will be too costly to do so.
-    const MAX_K: u32 = 10000;
+    const MAX_OPS: usize = 10000;
 
     let seq_diff = seq1.len().abs_diff(seq2.len()) as u32;
-    let dist = if seq_diff <= MAX_K {
-        bounded_levenshtein(seq1, seq2, MAX_K).unwrap_or(MAX_K)
+    let num_operations = seq1.len() * seq2.len();
+    let dist = if num_operations <= MAX_OPS {
+        levenshtein(seq1, seq2)
     } else {
         seq_diff // lower bound on ED
     };

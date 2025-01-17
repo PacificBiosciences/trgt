@@ -148,6 +148,8 @@ tandem repeats at genome scale. 2024](https://www.nature.com/articles/s41587-023
   - Algorithmic changes to `--genotyper cluster` allow fewer reads to be assigned to an allele; this may result in minor changes to consensus sequence and read assignment
 - 1.4.1
   - Bug fix: corrected the type of the rq tag in BAM output
+- 1.5.0
+  - Read clustering genotyper (`--genotyper cluster`) is now significantly faster at genotyping high-coverage repeat expansions; this may result in minor changes to consensus sequence and read assignment for highly mosaic repeats
 
 ### DISCLAIMER
 
