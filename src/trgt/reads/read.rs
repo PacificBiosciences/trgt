@@ -1,22 +1,11 @@
 //! Module for representing and building read information from alignment records.
 //!
 
-use super::{cigar::Cigar, meth, snp};
+use super::{cigar::Cigar, snp};
 use crate::utils::GenomicRegion;
 use itertools::Itertools;
 use rust_htslib::bam::{self, ext::BamRecordExtensions, record::Aux};
 use std::str;
-
-/// Represents methylation information extracted from a read.
-///
-/// # Attributes
-/// * `poses` - Vector of positions where methylation is detected.
-/// * `probs` - Vector of probabilities associated with the methylation calls.
-#[derive(Debug)]
-pub struct MethInfo {
-    pub poses: Vec<usize>,
-    pub probs: Vec<u8>,
-}
 
 /// Represents a single HiFi read from an alignment record.
 #[derive(PartialEq, Clone)]
@@ -63,6 +52,43 @@ impl std::fmt::Debug for HiFiRead {
     }
 }
 
+fn get_meth(rec: &bam::Record, bases: &[u8]) -> Option<Vec<u8>> {
+    let reverse = rec.is_reverse();
+    let cpg_indices: Vec<usize> = std::str::from_utf8(bases)
+        .unwrap()
+        .match_indices("CG")
+        .map(|(x, _)| {
+            x + if reverse { 1 } else { 0 } // need Gs for reverse
+        })
+        .collect::<Vec<usize>>();
+    let num_cpgs = cpg_indices.len();
+    let mut ans: Vec<u8> = vec![0; cpg_indices.len()];
+    let mut ind = 0;
+    if let Ok(mods) = rec.basemods_iter() {
+        for (pos, m) in mods.flatten() {
+            if m.canonical_base as u8 == b'C' {
+                let pos = pos as usize;
+                while ind < num_cpgs && cpg_indices[ind] < pos {
+                    ind += 1;
+                }
+                if ind < num_cpgs && pos == cpg_indices[ind] {
+                    ans[ind] = m.qual as u8;
+                    ind += 1;
+                }
+            }
+        }
+        if ind == 0 {
+            //empty MM/ML
+            return None;
+        }
+        if reverse {
+            ans.reverse();
+        }
+        return Some(ans);
+    }
+    None
+}
+
 impl HiFiRead {
     /// Creates a `HiFiRead` from an HTSlib record and a genomic region.
     ///
@@ -78,17 +104,7 @@ impl HiFiRead {
         let bases = rec.seq().as_bytes();
         let quals = rec.qual().to_vec();
 
-        let meth = get_mm_tag(rec).and_then(|mm_tag| {
-            get_ml_tag(rec)
-                .and_then(|ml_tag| parse_meth_tags(mm_tag, ml_tag))
-                .and_then(|tags| {
-                    if rec.is_reverse() {
-                        meth::decode_on_minus(&bases, &tags)
-                    } else {
-                        meth::decode_on_plus(&bases, &tags)
-                    }
-                })
-        });
+        let meth: Option<Vec<u8>> = get_meth(rec, &bases);
 
         let mapq = rec.mapq();
         let hp_tag = get_hp_tag(rec);
@@ -125,71 +141,6 @@ impl HiFiRead {
     }
 }
 
-/// Parses methylation tags from a BAM record into a `MethInfo` struct.
-///
-/// # Arguments
-/// * `mm_tag` - The MM tag from the BAM record.
-/// * `ml_tag` - The ML tag from the BAM record.
-///
-/// # Returns
-/// Returns an `Option<MethInfo>` which is `Some` if the tags could be parsed, otherwise `None`.
-fn parse_meth_tags(mm_tag: Aux, ml_tag: Aux) -> Option<MethInfo> {
-    let mm_tag = match mm_tag {
-        Aux::String(tag) => tag,
-        _ => panic!("Unexpected MM tag format: {:?}", mm_tag),
-    };
-
-    let mm_tag = mm_tag
-        .strip_prefix("C+m?")
-        .or_else(|| mm_tag.strip_prefix("C+m"))?;
-    let mm_tag = mm_tag.trim_matches(',');
-
-    let first_mm_rec = mm_tag.split(';').next()?;
-    if first_mm_rec.is_empty() {
-        return None;
-    }
-    let poses = first_mm_rec
-        .split(',')
-        .map(|n| n.parse::<usize>().unwrap())
-        .collect::<Vec<usize>>();
-
-    let mut probs = match ml_tag {
-        Aux::ArrayU8(tag) => tag.iter().collect::<Vec<_>>(),
-        _ => panic!("Unexpected ML tag format: {:?}", ml_tag),
-    };
-
-    // If MM tag contains a semicolon, it must be composite
-    if mm_tag.contains(';') {
-        probs = probs[..poses.len()].to_vec();
-    }
-
-    assert_eq!(poses.len(), probs.len());
-
-    Some(MethInfo { poses, probs })
-}
-
-/// Retrieves the MM tag from a BAM record.
-///
-/// # Arguments
-/// * `rec` - A reference to the BAM record.
-///
-/// # Returns
-/// Returns an `Option<Aux>` which is `Some` if the MM tag is present, otherwise `None`.
-fn get_mm_tag(rec: &bam::Record) -> Option<Aux> {
-    rec.aux(b"MM").or_else(|_| rec.aux(b"Mm")).ok()
-}
-
-/// Retrieves the ML tag from a BAM record.
-///
-/// # Arguments
-/// * `rec` - A reference to the BAM record.
-///
-/// # Returns
-/// Returns an `Option<Aux>` which is `Some` if the ML tag is present, otherwise `None`.
-fn get_ml_tag(rec: &bam::Record) -> Option<Aux> {
-    rec.aux(b"ML").or_else(|_| rec.aux(b"Ml")).ok()
-}
-
 /// Retrieves the RQ (read quality) tag from a BAM record.
 ///
 /// # Arguments
@@ -215,5 +166,40 @@ fn get_hp_tag(rec: &bam::Record) -> Option<u8> {
     match rec.aux(b"HP") {
         Ok(Aux::U8(value)) => Some(value),
         _ => None,
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_htslib::bam::{record::Aux, Record};
+
+    fn create_record(bases: &[u8], mm: &str, ml: &[u8], reverse: bool) -> Record {
+        let mut rec = Record::new();
+        let qual = vec![40; bases.len()];
+        if reverse {
+            rec.set_flags(0x10);
+        }
+        rec.set(b"test", None, bases, &qual);
+        rec.push_aux(b"MM", Aux::String(mm)).unwrap();
+        rec.push_aux(b"ML", Aux::ArrayU8(ml.into())).unwrap();
+        rec
+    }
+
+    #[test]
+    fn test_basemods_error() {
+        let bases = b"ACGTCG";
+        let rec = create_record(bases, "no", &[42], false);
+        let res = get_meth(&rec, bases);
+        assert!(res.is_none());
+    }
+
+    #[test]
+    fn test_matching_modifications() {
+        let bases = b"AGTCTAGACTCCGTAATTACTCGCCTAG";
+        let mm = "C+m,3,1;";
+        let ml = [249, 4];
+        let rec = create_record(bases, mm, &ml, false);
+        let res = get_meth(&rec, bases);
+        assert_eq!(res, Some(vec![249, 4]));
     }
 }
