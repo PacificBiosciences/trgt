@@ -1,11 +1,15 @@
-use super::align::{MotifBound, SegType};
-use super::align_allele::get_allele_align;
-use super::color::{get_meth_colors, Color, ColorMap};
-use super::read::{Betas, Read};
-use crate::trvz::align::{Align, AlignOp};
-use crate::trvz::locus::Locus;
+use super::{
+    align::{MotifBound, SegType},
+    align_allele::get_allele_align,
+    color::{get_meth_colors, Color, ColorMap},
+    read::{Betas, Read},
+};
+use crate::trvz::{
+    align::{Align, AlignOp},
+    locus::Locus,
+};
 use itertools::Itertools;
-use pipeplot::{Band, Legend, Pipe, PipePlot, Seg, Shape};
+use pipeplot::{Band, FontConfig, Legend, Pipe, PipePlot, Seg, Shape};
 
 pub fn plot_alleles(
     locus: &Locus,
@@ -95,7 +99,11 @@ pub fn plot_alleles(
         labels,
     };
 
-    PipePlot { pipes, legend }
+    PipePlot {
+        pipes,
+        legend,
+        font: FontConfig::default(),
+    }
 }
 
 fn get_scales(

@@ -1,16 +1,20 @@
 use arrayvec::ArrayVec;
-use bio::alignment::{Alignment, AlignmentOperation};
+use bio::alignment::AlignmentOperation;
 use itertools::Itertools;
 
-pub fn repair_consensus(reference: &str, seqs: &[&str], aligns: &[Alignment]) -> String {
+pub fn repair_consensus(
+    reference: &str,
+    seqs: &[&str],
+    aligns: &[Vec<AlignmentOperation>],
+) -> String {
     //                                        A  T  C  G  -
     let mut ref_counts = vec![[0, 0, 0, 0, 0]; reference.len()];
     let mut ref_inserts: Vec<Vec<String>> = vec![Vec::new(); reference.len() + 1];
-    for (seq_index, align) in aligns.iter().enumerate() {
+    for (seq_index, operations) in aligns.iter().enumerate() {
         let seq = seqs[seq_index];
         let mut x_pos = 0;
         let mut y_pos = 0;
-        for (op, group) in &align.operations.iter().group_by(|a| *a) {
+        for (op, group) in &operations.iter().group_by(|a| *a) {
             let op_len = group.count();
             match op {
                 AlignmentOperation::Match => {

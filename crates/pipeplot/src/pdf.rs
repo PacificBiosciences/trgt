@@ -1,14 +1,14 @@
-use std::path::PathBuf;
-use usvg::{TreeParsing, TreeTextToPath};
+use crate::prepare_svg_tree;
+use std::path::Path;
 
-pub fn render(svg_path: &PathBuf, pdf_path: &PathBuf) -> Result<(), String> {
-    let svg = std::fs::read_to_string(svg_path).map_err(|e| e.to_string())?;
-    let options = usvg::Options::default();
-    let mut tree = usvg::Tree::from_str(&svg, &options).expect("Error parsing SVG");
-    let mut db = usvg::fontdb::Database::new();
-    db.load_system_fonts();
-    tree.convert_text(&db);
-    let pdf = svg2pdf::convert_tree(&tree, svg2pdf::Options::default());
-    std::fs::write(pdf_path, pdf).map_err(|e| e.to_string())?;
+pub fn render_from_string(svg_content: &str, path: &Path) -> Result<(), String> {
+    let tree = prepare_svg_tree(svg_content.as_bytes())?;
+    let pdf = svg2pdf::to_pdf(
+        &tree,
+        svg2pdf::ConversionOptions::default(),
+        svg2pdf::PageOptions::default(),
+    )
+    .map_err(|e| format!("Failed to convert SVG to PDF: {}", e))?;
+    std::fs::write(path, pdf).map_err(|e| e.to_string())?;
     Ok(())
 }

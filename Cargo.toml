@@ -1,6 +1,6 @@
 [package]
 name = "trgt"
-version = "1.5.1"
+version = "2.0.0"
 edition = "2021"
 build = "build.rs"
 
@@ -28,3 +28,4 @@ crossbeam-channel = "0.5"
 pipeplot = { path = "crates/pipeplot" }
 semver = "1.0"
 tempfile = "3"
+wfa2-sys = { version = "0.1.0", git = "https://github.com/ctsa/rust-wfa2.git", rev = "4342b3b06278656fa51c0a33b4eb0b67d53bfa8c" }

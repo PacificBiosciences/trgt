@@ -42,7 +42,31 @@ pub struct Legend {
 }
 
 #[derive(Debug)]
+pub struct FontConfig {
+    pub family: String,
+    pub weight: String,
+    pub size: String,
+}
+
+impl Default for FontConfig {
+    fn default() -> Self {
+        Self {
+            family: "Roboto Mono".to_string(),
+            weight: "bold".to_string(),
+            size: "14px".to_string(),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct PipePlot {
     pub pipes: Vec<Pipe>,
     pub legend: Legend,
+    pub font: FontConfig,
+}
+
+impl PipePlot {
+    pub fn set_font_family(&mut self, font_family: &str) {
+        self.font.family = font_family.to_owned();
+    }
 }

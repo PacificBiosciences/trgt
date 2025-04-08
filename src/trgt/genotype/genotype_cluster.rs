@@ -1,9 +1,13 @@
 use super::{consensus, Gt, TrSize};
-use crate::utils::{align, Ploidy};
+use crate::{
+    commands::genotype::THREAD_WFA_ED,
+    utils::{align, Ploidy},
+    wfa_aligner::WFAligner,
+};
 use arrayvec::ArrayVec;
-use bio::alignment::distance::simd::levenshtein;
 use itertools::Itertools;
 use kodama::{linkage, Method};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 pub fn central_read(num_seqs: usize, group: &[usize], dists: &[f64]) -> usize {
     let group_size = group.len();
@@ -16,7 +20,6 @@ pub fn central_read(num_seqs: usize, group: &[usize], dists: &[f64]) -> usize {
         for j in (i + 1)..group_size {
             let index1 = group[i];
             let index2 = group[j];
-
             /* dist_sums has the condensed distance matrix, element 0 is
              * dist(seq[0], seq[1]), element 1 is dist(seq[0], seq[2]), etc.
              * This is the "inverse" that finds the matrix index based on the
@@ -119,21 +122,26 @@ pub fn genotype(ploidy: Ploidy, trs: &[&str]) -> (Gt, Vec<String>, Vec<i32>) {
     // avoid constant conversion
     let a1 = allele1.as_bytes();
     let a2 = allele2.as_bytes();
-    for i in 0..num_seqs {
-        let mut tie_breaker = 1;
-        if classifications[i] == 2 {
-            let dist1 = get_dist(trs[i], a1);
-            let dist2 = get_dist(trs[i], a2);
-            if dist1 < dist2 {
-                classifications[i] = 0;
-            } else if dist2 < dist1 {
-                classifications[i] = 1;
-            } else {
-                tie_breaker = (tie_breaker + 1) % 2;
-                classifications[i] = tie_breaker;
+
+    // NOTE: Should this run in parallel?
+    THREAD_WFA_ED.with(|aligner_cell| {
+        let mut aligner = aligner_cell.borrow_mut();
+        for i in 0..num_seqs {
+            let mut tie_breaker = 1;
+            if classifications[i] == 2 {
+                let dist1 = get_dist(trs[i], a1, &mut aligner);
+                let dist2 = get_dist(trs[i], a2, &mut aligner);
+                if dist1 < dist2 {
+                    classifications[i] = 0;
+                } else if dist2 < dist1 {
+                    classifications[i] = 1;
+                } else {
+                    tie_breaker = (tie_breaker + 1) % 2;
+                    classifications[i] = tie_breaker;
+                }
             }
         }
-    }
+    });
 
     let (gt, alleles) = if allele1.len() > allele2.len() {
         classifications = classifications.iter().map(|x| 1 - x).collect();
@@ -226,27 +234,60 @@ fn get_ci(seqs: &[&str]) -> (usize, usize) {
     (min_val, max_val)
 }
 
-fn get_dist(seq1: &[u8], seq2: &[u8]) -> f64 {
-    // we'll skip ED in cases we already know it will be too costly to do so.
-    const MAX_OPS: usize = 10000;
-
-    let seq_diff = seq1.len().abs_diff(seq2.len()) as u32;
+// We skip ED in cases we already know it will be too costly to do so
+const MAX_OPS: usize = 10000;
+#[inline(always)]
+fn get_dist(seq1: &[u8], seq2: &[u8], aligner: &mut WFAligner) -> f64 {
+    let seq_diff = seq1.len().abs_diff(seq2.len()) as i32; // lower bound on ED
     let num_operations = seq1.len() * seq2.len();
-    let dist = if num_operations <= MAX_OPS {
-        levenshtein(seq1, seq2)
+    let dist = if num_operations > MAX_OPS {
+        seq_diff
     } else {
-        seq_diff // lower bound on ED
+        let _status = aligner.align_end_to_end(seq1, seq2);
+        aligner.score()
     };
     (dist as f64).sqrt()
 }
 
 fn get_dist_matrix(trs: &[&[u8]]) -> Vec<f64> {
-    let dist_len = trs.len() * (trs.len() - 1) / 2;
-    let mut dists = Vec::with_capacity(dist_len);
-    for (index1, tr1) in trs.iter().enumerate() {
-        for (_index2, tr2) in trs.iter().enumerate().skip(index1 + 1) {
-            let dist = get_dist(tr1, tr2);
-            dists.push(dist);
+    let n = trs.len();
+    if n < 2 {
+        return Vec::new();
+    }
+    let dist_len = n * (n - 1) / 2;
+
+    // Parallelize the outer loop and then reuse the aligner in the inner loop
+    let results_per_thread: Vec<Vec<(usize, f64)>> = (0..n)
+        .into_par_iter()
+        .map(|i| {
+            // Calculate the base index part for the current i once before the inner loop, index for pair (i, j) in condensed upper triangle matrix
+            // This represents the number of elements before the start of row 'i' in the condensed matrix, adjusted so that adding 'j' gives the final index.
+            let base_index_for_i = i * n - (i * (i + 1)) / 2 - (i + 1);
+            let mut thread_results = Vec::new();
+            THREAD_WFA_ED.with(|aligner_cell| {
+                // Access thread local and borrow ONCE per thread's chunk of i values, the inner loop reuses the same aligner instance
+                let mut aligner = aligner_cell.borrow_mut();
+                for j in (i + 1)..n {
+                    let dist = get_dist(trs[i], trs[j], &mut aligner);
+                    let index = base_index_for_i + j;
+                    thread_results.push((index, dist));
+                }
+            });
+            thread_results
+        })
+        .collect();
+
+    // Flatten the results, bound check commented out.
+    let mut dists = vec![0.0; dist_len];
+    for thread_batch in results_per_thread {
+        for (index, dist) in thread_batch {
+            dists[index] = dist;
+            // if index < dist_len {
+            //     dists[index] = dist;
+            // } else {
+            //     // This should never happen if the index calculation is correct
+            //     log::error!("Calculated index {} out of bounds ({})", index, dist_len,);
+            // }
         }
     }
     assert_eq!(dists.len(), dist_len);

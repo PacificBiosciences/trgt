@@ -48,26 +48,16 @@ impl Locus {
         };
 
         let region = GenomicRegion::from_string(&format!("{}:{}-{}", chrom, start, end))?;
-
         check_region_bounds(&region, flank_len, chrom_lookup)?;
 
         let ploidy = karyotype.get_ploidy(chrom)?;
-
         let fields = decode_fields(info_fields)?;
-
-        let get_field = |key: &str| {
-            fields
-                .get(key)
-                .ok_or_else(|| format!("{} field missing", key))
-                .map(|s| s.to_string())
-        };
-
-        let id = get_field("ID")?;
-        let motifs = get_field("MOTIFS")?
+        let id = get_field(&fields, "ID")?;
+        let motifs = get_field(&fields, "MOTIFS")?
             .split(',')
             .map(|s| s.to_string())
             .collect();
-        let struc = get_field("STRUC")?;
+        let struc = get_field(&fields, "STRUC")?;
 
         let (left_flank, tr, right_flank) = get_tr_and_flanks(genome_reader, &region, flank_len)?;
 
@@ -109,20 +99,18 @@ pub fn stream_loci_into_channel(
     genotyper: Genotyper,
     karyotype: &Karyotype,
     sender: Sender<Result<Locus>>,
-) {
-    let catalog_reader = open_catalog_reader(repeats_path).unwrap();
-    let genome_reader = open_genome_reader(genome_path).unwrap();
-    let chrom_lookup = create_chrom_lookup(&genome_reader).unwrap();
+) -> Result<()> {
+    let catalog_reader = open_catalog_reader(repeats_path)?;
+    let genome_reader = open_genome_reader(genome_path)?;
+    let chrom_lookup = create_chrom_lookup(&genome_reader)?;
 
     for (line_number, result_line) in catalog_reader.lines().enumerate() {
         let line = match result_line {
             Ok(line) => line,
             Err(err) => {
                 let error = format!("Error at BED line {}: {}", line_number + 1, err);
-                sender
-                    .send(Err(error))
-                    .expect("Failed to send error through channel");
-                return;
+                sender.send(Err(error)).map_err(|e| e.to_string())?;
+                break;
             }
         };
 
@@ -138,17 +126,14 @@ pub fn stream_loci_into_channel(
             Ok(locus) => Ok(locus),
             Err(e) => {
                 let error = format!("Error at BED line {}: {}", line_number + 1, e);
-                sender
-                    .send(Err(error))
-                    .expect("Failed to send error through channel");
+                sender.send(Err(error)).map_err(|e| e.to_string())?;
                 continue;
             }
         };
 
-        sender
-            .send(locus)
-            .expect("Failed to send locus through channel");
+        sender.send(locus).map_err(|e| e.to_string())?;
     }
+    Ok(())
 }
 
 pub fn get_loci(
@@ -180,7 +165,7 @@ pub fn get_loci(
         })
 }
 
-fn get_tr_and_flanks(
+pub fn get_tr_and_flanks(
     genome: &faidx::Reader,
     region: &GenomicRegion,
     flank_len: usize,
@@ -204,7 +189,14 @@ fn get_tr_and_flanks(
     Ok((left_flank, tr, right_flank))
 }
 
-fn decode_fields(info_fields: &str) -> Result<HashMap<&str, String>> {
+pub fn get_field(fields: &HashMap<&str, String>, key: &str) -> Result<String> {
+    fields
+        .get(key)
+        .ok_or_else(|| format!("{} field missing", key))
+        .map(|s| s.to_string())
+}
+
+pub fn decode_fields(info_fields: &str) -> Result<HashMap<&str, String>> {
     let mut fields = HashMap::new();
     for field_encoding in info_fields.split(';') {
         let (name, value) = decode_info_field(field_encoding).map_err(|e| e.to_string())?;
@@ -225,7 +217,7 @@ fn decode_info_field(encoding: &str) -> Result<(&str, &str)> {
     }
 }
 
-fn check_region_bounds(
+pub fn check_region_bounds(
     region: &GenomicRegion,
     flank_len: usize,
     chrom_lookup: &HashMap<String, u32>,

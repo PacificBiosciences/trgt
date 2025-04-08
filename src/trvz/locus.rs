@@ -1,8 +1,18 @@
-use crate::trvz::struc::RegionLabel;
-use crate::utils::{GenomicRegion, Result};
-use itertools::Itertools;
+use crate::{
+    trgt::locus::{check_region_bounds, decode_fields, get_field, get_tr_and_flanks},
+    trvz::struc::RegionLabel,
+    utils::{GenomicRegion, Result},
+};
 use rust_htslib::faidx;
 use std::collections::HashMap;
+
+#[derive(Debug)]
+pub struct Allele {
+    pub seq: String,
+    pub region_labels: Vec<RegionLabel>,
+    pub flank_labels: Vec<RegionLabel>,
+    //pub base_labels: Vec<BaseLabel>,
+}
 
 #[derive(Debug)]
 pub struct Locus {
@@ -14,91 +24,49 @@ pub struct Locus {
     pub region: GenomicRegion,
 }
 
-#[derive(Debug)]
-pub struct Allele {
-    pub seq: String,
-    pub region_labels: Vec<RegionLabel>,
-    pub flank_labels: Vec<RegionLabel>,
-    //pub base_labels: Vec<BaseLabel>,
-}
+impl Locus {
+    pub fn new(
+        genome_reader: &faidx::Reader,
+        chrom_lookup: &HashMap<String, u32>,
+        line: &str,
+        flank_len: usize,
+    ) -> Result<Self> {
+        const EXPECTED_FIELD_COUNT: usize = 4;
+        let split_line: Vec<&str> = line.split_whitespace().collect();
+        if split_line.len() != EXPECTED_FIELD_COUNT {
+            return Err(format!(
+                "Expected {} fields in the format 'chrom start end info', found {}: {}",
+                EXPECTED_FIELD_COUNT,
+                split_line.len(),
+                line
+            ));
+        }
 
-fn get_flanks(
-    genome: &faidx::Reader,
-    region: &GenomicRegion,
-    flank_len: usize,
-) -> Result<(String, String)> {
-    let (lf_start, lf_end) = (region.start as usize - flank_len, region.start as usize);
-    let (rf_start, rf_end) = (region.end as usize, region.end as usize + flank_len);
+        let (chrom, start, end, info_fields) = match &split_line[..] {
+            [chrom, start, end, info_fields] => (*chrom, *start, *end, *info_fields),
+            _ => unreachable!(),
+        };
 
-    let left_flank = match genome.fetch_seq_string(&region.contig, lf_start, lf_end - 1) {
-        Ok(seq) => seq,
-        Err(_) => return Err(format!("Unable to extract: {:?}", region)),
-    };
-    let right_flank = match genome.fetch_seq_string(&region.contig, rf_start, rf_end - 1) {
-        Ok(seq) => seq,
-        Err(_) => return Err(format!("Unable to extract: {:?}", region)),
-    };
-    Ok((left_flank.to_uppercase(), right_flank.to_uppercase()))
-}
+        let region = GenomicRegion::from_string(&format!("{}:{}-{}", chrom, start, end))?;
+        check_region_bounds(&region, flank_len, chrom_lookup)?;
 
-fn decode_info_field(encoding: &str) -> Result<(&str, &str)> {
-    let name_and_value: Vec<&str> = encoding.split('=').collect();
-    if name_and_value.len() != 2 {
-        return Err(format!("Invalid entry: {encoding}"));
+        let fields = decode_fields(info_fields)?;
+        let id = get_field(&fields, "ID")?;
+        let motifs = get_field(&fields, "MOTIFS")?
+            .split(',')
+            .map(|s| s.to_string())
+            .collect();
+        let struc = get_field(&fields, "STRUC")?;
+
+        let (left_flank, _, right_flank) = get_tr_and_flanks(genome_reader, &region, flank_len)?;
+
+        Ok(Locus {
+            id,
+            struc,
+            motifs,
+            left_flank,
+            right_flank,
+            region,
+        })
     }
-    Ok((name_and_value[0], name_and_value[1]))
-}
-
-pub fn decode(flank_len: usize, genome: &faidx::Reader, encoding: &str) -> Result<Locus> {
-    let split_line: Vec<&str> = encoding.split_whitespace().collect();
-    if split_line.len() != 4 {
-        return Err(format!("Invalid bed entry encountered: {encoding}"));
-    }
-
-    let encoding = format!("{}:{}-{}", split_line[0], split_line[1], split_line[2]);
-    let region = GenomicRegion::from_string(&encoding).unwrap();
-
-    let info_fields = split_line[3];
-
-    let mut name_to_value = HashMap::new();
-    for field_encoding in info_fields.split(';') {
-        let (name, value) = decode_info_field(field_encoding)?;
-        name_to_value.insert(
-            name,
-            match name {
-                "ID" => value,
-                "STRUC" => value,
-                "MOTIFS" => value,
-                _ => "",
-            },
-        );
-    }
-
-    let id = name_to_value
-        .get("ID")
-        .ok_or_else(|| format!("Missing ID in {}", encoding))?
-        .to_string();
-
-    let motifs = name_to_value
-        .get("MOTIFS")
-        .ok_or_else(|| format!("Missing MOTIFS in {}", encoding))?
-        .split(',')
-        .map(|s| s.to_string())
-        .collect_vec();
-
-    let struc = name_to_value
-        .get("STRUC")
-        .ok_or_else(|| format!("Missing STRUC in {}", encoding))?
-        .to_string();
-
-    let (left_flank, right_flank) = get_flanks(genome, &region, flank_len)?;
-
-    Ok(Locus {
-        id,
-        struc,
-        motifs,
-        left_flank,
-        right_flank,
-        region,
-    })
 }

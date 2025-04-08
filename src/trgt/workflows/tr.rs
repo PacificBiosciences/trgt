@@ -8,15 +8,13 @@ use crate::trgt::{
     locus::Locus,
     reads::HiFiRead,
 };
-use crate::utils::{Genotyper, Ploidy, Result, TrgtScoring};
+use crate::utils::{Genotyper, Ploidy, Result};
 use itertools::{izip, Itertools};
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use rust_htslib::bam::{self, Read, Record};
 use std::vec;
 
 pub struct Params {
-    pub aln_scoring: TrgtScoring,
     pub min_flank_id_frac: f64,
     pub min_read_qual: f64,
     pub search_flank_len: usize,
@@ -32,7 +30,6 @@ pub fn analyze(
         return Ok(LocusResult::empty());
     }
     let reads = extract_reads(locus, bam, params)?;
-
     let clip_radius = 2 * params.search_flank_len;
     let reads = clip_reads(locus, clip_radius, reads);
     log::debug!("{}: {} reads left after clipping", locus.id, reads.len());
@@ -116,7 +113,12 @@ fn get_spanning_reads(
     params: &Params,
     reads: Vec<HiFiRead>,
 ) -> (Vec<HiFiRead>, Vec<(usize, usize)>) {
-    let tr_spans = find_tr_spans(&locus.left_flank, &locus.right_flank, &reads, params);
+    let tr_spans = find_tr_spans(
+        locus.left_flank.as_bytes(),
+        locus.right_flank.as_bytes(),
+        &reads,
+        params,
+    );
 
     let reads_and_spans = reads
         .into_iter()
@@ -406,14 +408,11 @@ fn filter_impure_trs(
     let mut hmm = Hmm::new(0);
     let mut motifs = Vec::new();
     const PURITY_CUTOFF: f64 = 0.9;
-    izip!(reads, spans)
-        .filter(|(read, span)| {
-            if num_filtered == max_filter {
-                return true;
-            }
+    let mut ret = izip!(reads, spans)
+        .map(|(read, span)| {
             if let Some(rq) = read.read_qual {
                 if rq >= rq_cutoff {
-                    return true;
+                    return (read, span, 1.0);
                 }
             }
             // since HMM building is costly, we will do a "lazy build", i.e., only
@@ -431,14 +430,25 @@ fn filter_impure_trs(
             let seq = std::str::from_utf8(&read.bases[span.0..span.1]).unwrap();
             let seq = replace_invalid_bases(seq, &['A', 'T', 'C', 'G']);
             let labels = hmm.label(&seq);
-            if calc_purity(seq.as_bytes(), &hmm, &motifs, &labels) >= PURITY_CUTOFF {
+            let purity = calc_purity(seq.as_bytes(), &hmm, &motifs, &labels);
+            (read, span, purity)
+        })
+        .collect_vec();
+
+    ret.sort_by(|(_, _, pa), (_, _, pb)| f64::total_cmp(pa, pb));
+    let ret = ret
+        .iter()
+        .filter(|(_, _, purity)| {
+            if *purity >= PURITY_CUTOFF || num_filtered >= max_filter {
                 return true;
             }
             num_filtered += 1;
             false
         })
-        .map(|(r, s)| (r.clone(), s))
-        .multiunzip()
+        .collect_vec();
+    let reads = ret.iter().map(|r| (r.0).clone()).collect();
+    let spans = ret.iter().map(|r| *(r.1)).collect();
+    (reads, spans)
 }
 
 fn label_with_hmm(locus: &Locus, seqs: &Vec<String>) -> Vec<Annotation> {

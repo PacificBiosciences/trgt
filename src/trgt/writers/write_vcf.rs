@@ -7,11 +7,14 @@ use crate::trgt::{
 };
 use crate::utils::Result;
 use itertools::Itertools;
+use once_cell::sync::Lazy;
 use rust_htslib::{
     bam,
     bcf::{self, record::GenotypeAllele, Format, Record},
 };
 use std::env;
+
+static MISSING_FLOAT: Lazy<f32> = Lazy::new(|| f32::from_bits(0x7F80_0001));
 
 /// Header lines defining the INFO and FORMAT fields for the VCF file.
 const VCF_LINES: [&str; 12] = [
@@ -110,6 +113,7 @@ impl VcfWriter {
         let rid = self.writer.header().name2rid(contig).unwrap();
         record.set_rid(Some(rid));
         record.set_pos(locus.region.start.saturating_sub(1) as i64);
+        record.set_qual(*MISSING_FLOAT);
 
         let id = locus.id.as_bytes();
         record.push_info_string(b"TRID", &[id]).unwrap();

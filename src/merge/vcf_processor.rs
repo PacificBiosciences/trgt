@@ -18,6 +18,7 @@ use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashSet},
     env,
+    path::PathBuf,
 };
 
 const MISSING_INTEGER: i32 = i32::MIN;
@@ -141,8 +142,8 @@ pub struct VcfProcessor {
 }
 
 impl VcfProcessor {
-    pub fn new(args: &MergeArgs) -> Result<Self> {
-        let vcf_readers = VcfReaders::new(args.vcfs.clone())?;
+    pub fn new(args: &MergeArgs, vcfs: Vec<PathBuf>) -> Result<Self> {
+        let vcf_readers = VcfReaders::new(vcfs)?;
         if vcf_readers.readers.len() == 1 && !args.force_single {
             return Err("Expected two or more files to merge, got only one. Use --force-single to proceed anyway".into());
         }
@@ -440,7 +441,7 @@ impl VcfProcessor {
     fn set_dummy_record_fields(&mut self, template_record: &Record) {
         self.writer.dummy_record.set_rid(template_record.rid());
         self.writer.dummy_record.set_pos(template_record.pos());
-        self.writer.dummy_record.set_qual(template_record.qual());
+        self.writer.dummy_record.set_qual(*MISSING_FLOAT);
 
         self.set_info_field(template_record, b"TRID", FieldType::String);
         self.set_info_field(template_record, b"END", FieldType::Integer);

@@ -8,7 +8,8 @@ use env_logger::fmt::Color;
 use log::{Level, LevelFilter};
 use once_cell::sync::Lazy;
 use std::{
-    io::Write,
+    fs::File,
+    io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
 };
 
@@ -36,9 +37,13 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
 
-    #[clap(short = 'v')]
-    #[clap(long = "verbose")]
-    #[clap(action = ArgAction::Count, help = "Specify multiple times to increase verbosity level (e.g., -vv for more verbosity)")]
+    /// Specify multiple times to increase verbosity level (e.g., -vv for more verbosity)
+    #[arg(
+        short = 'v',
+        long = "verbose",
+        action = ArgAction::Count,
+        global = true
+    )]
     pub verbosity: u8,
 }
 
@@ -54,99 +59,124 @@ pub enum Command {
     Merge(MergeArgs),
 }
 
+impl Command {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Command::Genotype(_) => "genotype",
+            Command::Plot(_) => "plot",
+            Command::Validate(_) => "validate",
+            Command::Merge(_) => "merge",
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
-#[command(group(ArgGroup::new("merge")))]
+#[command(group(
+    ArgGroup::new("input")
+        .required(true)
+        .args(["vcfs", "vcf_list"]),
+))]
 #[command(arg_required_else_help(true))]
 pub struct MergeArgs {
-    #[clap(required = true)]
-    #[clap(short = 'v')]
-    #[clap(long = "vcf")]
-    #[clap(help = "VCF files to merge")]
-    #[clap(value_name = "VCF")]
-    #[clap(num_args = 1..)]
-    #[arg(value_parser = check_file_exists)]
-    pub vcfs: Vec<PathBuf>,
+    /// VCF files to merge
+    #[arg(
+        long = "vcf",
+        value_name = "VCF",
+        num_args = 1..,
+        value_parser = check_file_exists
+    )]
+    pub vcfs: Option<Vec<PathBuf>>,
 
-    #[clap(short = 'g')]
-    #[clap(long = "genome")]
-    #[clap(help = "Path to reference genome FASTA")]
-    #[clap(value_name = "FASTA")]
-    #[arg(value_parser = check_file_exists)]
+    /// File containing paths of VCF files to merge (one per line)
+    #[arg(
+        long = "vcf-list",
+        value_name = "VCF_LIST",
+        value_parser = check_file_exists
+    )]
+    pub vcf_list: Option<PathBuf>,
+
+    /// Path to reference genome FASTA
+    #[arg(
+         short = 'g',
+         long = "genome",
+         value_name = "FASTA",
+         value_parser = check_file_exists
+     )]
     pub genome_path: Option<PathBuf>,
 
-    #[clap(short = 'o')]
-    #[clap(long = "output")]
-    #[clap(value_name = "FILE")]
-    #[clap(help = "Write output to a file [standard output]")]
-    #[arg(value_parser = check_prefix_path)]
+    /// Write output to a file [standard output]
+    #[arg(
+        short = 'o',
+        long = "output",
+        value_name = "FILE",
+        value_parser = check_prefix_path
+    )]
     pub output: Option<PathBuf>,
 
-    #[clap(help_heading("Advanced"))]
-    #[clap(short = 'O')]
-    #[clap(long = "output-type")]
-    #[clap(value_name = "OUTPUT_TYPE")]
-    #[clap(help = "Output type: u|b|v|z, u/b: un/compressed BCF, v/z: un/compressed VCF")]
-    #[clap(value_parser = merge_validate_output_type)]
+    /// Output type: u|b|v|z, u/b: un/compressed BCF, v/z: un/compressed VCF
+    #[arg(
+        short = 'O',
+        long = "output-type",
+        value_name = "OUTPUT_TYPE",
+        value_parser = merge_validate_output_type,
+        help_heading = "Advanced"
+    )]
     pub output_type: Option<OutputType>,
 
-    #[clap(help_heading("Advanced"))]
-    #[clap(long = "skip-n")]
-    #[clap(value_name = "SKIP_N")]
-    #[clap(help = "Skip the first N records")]
+    /// Skip the first N records
+    #[arg(long = "skip-n", value_name = "SKIP_N", help_heading = "Advanced")]
     pub skip_n: Option<usize>,
 
-    #[clap(help_heading("Advanced"))]
-    #[clap(long = "process-n")]
-    #[clap(value_name = "process_N")]
-    #[clap(help = "Only process N records")]
+    /// Only process N records
+    #[arg(
+        long = "process-n",
+        value_name = "PROCESS_N",
+        help_heading = "Advanced"
+    )]
     pub process_n: Option<usize>,
 
-    #[clap(help_heading("Advanced"))]
-    #[clap(long = "print-header")]
-    #[clap(help = "Print only the merged header and exit")]
+    /// Print only the merged header and exit
+    #[arg(long = "print-header", help_heading = "Advanced")]
     pub print_header: bool,
 
-    #[clap(help_heading("Advanced"))]
-    #[clap(long = "force-single")]
-    #[clap(help = "Run even if there is only one file on input")]
+    /// Run even if there is only one file on input
+    #[arg(long = "force-single", help_heading = "Advanced")]
     pub force_single: bool,
 
-    #[clap(help_heading("Advanced"))]
-    #[clap(hide = true)]
-    #[clap(long = "force-samples")]
-    #[clap(help = "Resolve duplicate sample names")]
+    /// Resolve duplicate sample names
+    #[arg(long = "force-samples", help_heading = "Advanced", hide = true)]
     pub force_samples: bool,
 
-    #[clap(help_heading("Advanced"))]
-    #[clap(long = "no-version")]
-    #[clap(help = "Do not append version and command line to the header")]
+    /// Do not append version and command line to the header
+    #[arg(long = "no-version", help_heading = "Advanced")]
     pub no_version: bool,
 
-    #[clap(help_heading("Advanced"))]
-    #[clap(hide = true)]
-    #[clap(long = "missing-to-ref")]
-    #[clap(help = "Assume genotypes at missing sites are 0/0")]
+    /// Assume genotypes at missing sites are 0/0
+    #[arg(long = "missing-to-ref", help_heading = "Advanced", hide = true)]
     pub missing_to_ref: bool,
 
-    #[clap(help_heading("Advanced"))]
-    #[clap(hide = true)]
-    #[clap(long = "strategy")]
-    #[clap(value_name = "STRATEGY")]
-    #[clap(help = "Set variant merging strategy to use")]
-    #[clap(value_parser(["exact"]))]
-    #[clap(default_value = "exact")]
+    /// Set variant merging strategy to use
+    #[arg(
+        long = "strategy",
+        value_name = "STRATEGY",
+        value_parser = ["exact"],
+        default_value = "exact",
+        help_heading = "Advanced",
+        hide = true
+    )]
     pub merge_strategy: String,
 
-    #[clap(help_heading("Advanced"))]
-    #[clap(long = "quit-on-errors")]
-    #[clap(help = "Quit immediately on errors during merging")]
+    /// Quit immediately on errors during merging
+    #[arg(long = "quit-on-errors", help_heading = "Advanced")]
     pub quit_on_error: bool,
 
-    #[clap(help_heading("Advanced"))]
-    #[clap(long = "contig")]
-    #[clap(value_name = "CONTIG")]
-    #[clap(help = "Process only the specified contigs (comma-separated list)")]
-    #[clap(value_delimiter = ',')]
+    /// Process only the specified contigs (comma-separated list)
+    #[arg(
+        long = "contig",
+        value_name = "CONTIG",
+        value_delimiter = ',',
+        help_heading = "Advanced"
+    )]
     pub contigs: Option<Vec<String>>,
 }
 
@@ -154,139 +184,163 @@ pub struct MergeArgs {
 #[command(group(ArgGroup::new("genotype")))]
 #[command(arg_required_else_help(true))]
 pub struct GenotypeArgs {
-    #[clap(required = true)]
-    #[clap(short = 'g')]
-    #[clap(long = "genome")]
-    #[clap(help = "Path to reference genome FASTA")]
-    #[clap(value_name = "FASTA")]
-    #[arg(value_parser = check_file_exists)]
+    /// Path to reference genome FASTA
+    #[arg(
+        short = 'g',
+        long = "genome",
+        value_name = "FASTA",
+        value_parser = check_file_exists,
+        required = true
+    )]
     pub genome_path: PathBuf,
 
-    #[clap(required = true)]
-    #[clap(short = 'r')]
-    #[clap(long = "reads")]
-    #[clap(help = "BAM file with aligned HiFi reads")]
-    #[clap(value_name = "READS")]
-    #[arg(value_parser = check_file_exists)]
+    /// BAM file with aligned HiFi reads
+    #[arg(
+        short = 'r',
+        long = "reads",
+        value_name = "READS",
+        value_parser = check_file_exists,
+        required = true
+    )]
     pub reads_path: PathBuf,
 
-    #[clap(required = true)]
-    #[clap(short = 'b')]
-    #[clap(long = "repeats")]
-    #[clap(help = "BED file with repeat coordinates")]
-    #[clap(value_name = "REPEATS")]
-    #[arg(value_parser = check_file_exists)]
+    /// BED file with repeat coordinates
+    #[arg(
+        short = 'b',
+        long = "repeats",
+        value_name = "REPEATS",
+        value_parser = check_file_exists,
+        required = true
+    )]
     pub repeats_path: PathBuf,
 
-    #[clap(required = true)]
-    #[clap(short = 'o')]
-    #[clap(long = "output-prefix")]
-    #[clap(help = "Prefix for output files")]
-    #[clap(value_name = "OUTPUT_PREFIX")]
-    #[arg(value_parser = check_prefix_path)]
+    /// Prefix for output files
+    #[arg(
+        short = 'o',
+        long = "output-prefix",
+        value_name = "OUTPUT_PREFIX",
+        value_parser = check_prefix_path,
+        required = true
+    )]
     pub output_prefix: PathBuf,
 
-    #[clap(long = "karyotype")]
-    #[clap(short = 'k')]
-    #[clap(value_name = "KARYOTYPE")]
-    #[clap(help = "Sample karyotype (XX or XY or file name)")]
-    #[clap(default_value = "XX")]
+    /// Sample karyotype (XX or XY or file name)
+    #[arg(
+        short = 'k',
+        long = "karyotype",
+        value_name = "KARYOTYPE",
+        default_value = "XX"
+    )]
     pub karyotype: String,
 
-    #[clap(short = 't')]
-    #[clap(long = "threads")]
-    #[clap(help = "Number of threads")]
-    #[clap(value_name = "THREADS")]
-    #[clap(default_value = "1")]
-    #[arg(value_parser = threads_in_range)]
+    /// Number of threads
+    #[arg(
+        short = 't',
+        long = "threads",
+        value_name = "THREADS",
+        default_value = "1",
+        value_parser = threads_in_range
+    )]
     pub num_threads: usize,
 
-    #[clap(long = "preset")]
-    #[clap(value_name = "PRESET")]
-    #[clap(help = "Parameter preset (wgs or targeted)")]
-    #[clap(default_value = "wgs")]
+    /// Parameter preset (wgs or targeted)
+    #[arg(long = "preset", value_name = "PRESET", default_value = "wgs")]
     pub preset: TrgtPreset,
 
-    #[clap(help_heading("Advanced"))]
-    #[clap(long = "sample-name")]
-    #[clap(value_name = "SAMPLE_NAME")]
-    #[clap(help = "Sample name")]
-    #[clap(default_value = None)]
-    #[arg(value_parser = check_sample_name_nonempty)]
+    /// Sample name
+    #[arg(
+        long = "sample-name",
+        value_name = "SAMPLE_NAME",
+        default_value = None,
+        value_parser = check_sample_name_nonempty,
+        help_heading = "Advanced"
+    )]
     pub sample_name: Option<String>,
 
-    #[clap(help_heading("Advanced"))]
-    #[clap(long = "genotyper")]
-    #[clap(value_name = "GENOTYPER")]
-    #[clap(help = "Genotyping algorithm (size or cluster)")]
-    #[clap(default_value = "size")]
-    #[clap(default_value_if("preset", "targeted", "cluster"))]
+    /// Genotyping algorithm (size or cluster)
+    #[arg(
+        long = "genotyper",
+        value_name = "GENOTYPER",
+        default_value = "size",
+        default_value_if("preset", "targeted", Some("cluster")),
+        help_heading = "Advanced"
+    )]
     pub genotyper: Genotyper,
 
-    #[clap(hide = true)]
-    #[clap(help_heading("Advanced"))]
-    #[clap(long = "aln-scoring")]
-    #[clap(value_name = "SCORING")]
-    #[clap(
-        help = "Scoring function to align to flanks (non-negative values): MATCH,MISM,GAPO,GAPE,KMERLEN,BANDWIDTH"
-    )]
-    #[clap(default_value = "1,1,5,1,8,6")]
-    #[clap(default_value_if("preset", "targeted", "1,1,0,1,1,5000"))]
-    #[arg(value_parser = scoring_from_string)]
+    /// Scoring function to align to flanks (non-negative values): MATCH,MISM,GAPO,GAPE
+    #[arg(
+         long = "aln-scoring",
+         value_name = "SCORING",
+         default_value = "0,2,6,2",
+         default_value_if("preset", "targeted", Some("0,1,0,1")),
+         value_parser = scoring_from_string,
+         help_heading = "Advanced",
+         hide = true
+     )]
     pub aln_scoring: TrgtScoring,
 
-    #[clap(hide = true)]
-    #[clap(help_heading("Advanced"))]
-    #[clap(long = "min-flank-id-frac")]
-    #[clap(value_name = "PERC")]
-    #[clap(help = "Minimum fraction of matches in a flank sequence to consider it 'found'")]
-    #[clap(default_value = "0.7")]
-    #[clap(default_value_if("preset", "targeted", "0.8"))]
-    #[arg(value_parser = ensure_unit_float)]
+    /// Minimum fraction of matches in a flank sequence to consider it 'found'
+    #[arg(
+        long = "min-flank-id-frac",
+        value_name = "PERC",
+        default_value = "0.7",
+        default_value_if("preset", "targeted", Some("0.8")),
+        value_parser = ensure_unit_float,
+        help_heading = "Advanced",
+        hide = true
+    )]
     pub min_flank_id_frac: f64,
 
-    #[clap(help_heading("Advanced"))]
-    #[clap(long = "flank-len")]
-    #[clap(value_name = "FLANK_LEN")]
-    #[clap(help = "Minimum length of the flanking sequence")]
-    #[clap(default_value = "250")]
-    #[clap(default_value_if("preset", "targeted", "200"))]
+    /// Minimum length of the flanking sequence
+    #[arg(
+        long = "flank-len",
+        value_name = "FLANK_LEN",
+        default_value = "250",
+        default_value_if("preset", "targeted", "200"),
+        help_heading = "Advanced"
+    )]
     pub flank_len: usize,
 
-    #[clap(help_heading("Advanced"))]
-    #[clap(long = "output-flank-len")]
-    #[clap(value_name = "FLANK_LEN")]
-    #[clap(help = "Length of flanking sequence to report on output")]
-    #[clap(default_value = "50")]
+    /// Length of flanking sequence to report on output
+    #[arg(
+        long = "output-flank-len",
+        value_name = "FLANK_LEN",
+        default_value = "50",
+        help_heading = "Advanced"
+    )]
     pub output_flank_len: usize,
 
-    #[clap(help_heading("Advanced"))]
-    #[clap(long = "fixed-flanks")]
-    #[clap(value_name = "FIXED_FLANKS")]
-    #[clap(help = "Keep flank length fixed")]
+    /// Keep flank length fixed
+    #[arg(
+        long = "fixed-flanks",
+        value_name = "FIXED_FLANKS",
+        help_heading = "Advanced"
+    )]
     pub fixed_flanks: bool,
 
-    #[clap(hide = true)]
-    #[clap(help_heading("Advanced"))]
-    #[clap(long = "min-read-quality")]
-    #[clap(value_name = "MIN_RQ")]
-    #[clap(help = "Minimum HiFi rq value required to use a read for genotyping")]
-    #[clap(default_value = "0.98")]
-    #[clap(default_value_if("preset", "targeted", "-1.0"))]
-    // #[arg(value_parser = ensure_unit_float)]
+    /// Minimum HiFi rq value required to use a read for genotyping
+    #[arg(
+        long = "min-read-quality",
+        value_name = "MIN_RQ",
+        default_value = "0.98",
+        default_value_if("preset", "targeted", Some("-1.0")),
+        help_heading = "Advanced",
+        hide = true
+    )]
     pub min_hifi_read_qual: f64,
 
-    #[clap(help_heading("Advanced"))]
-    #[clap(long = "disable-bam-output")]
-    #[clap(help = "Disable BAM output")]
+    /// Disable BAM output
+    #[arg(long = "disable-bam-output", help_heading = "Advanced")]
     pub disable_bam_output: bool,
 
-    #[clap(help_heading("Advanced"))]
-    #[clap(long = "max-depth")]
-    #[clap(value_name = "MAX_DEPTH")]
-    #[clap(help = "Maximum locus depth")]
-    #[clap(default_value = "250")]
-    #[clap(default_value_if("preset", "targeted", "10000"))]
+    /// Maximum locus depth
+    #[arg(
+        long = "max-depth",
+        value_name = "MAX_DEPTH",
+        default_value = "250",
+        default_value_if("preset", "targeted", Some("10000")),
+        help_heading = "Advanced"
+    )]
     pub max_depth: usize,
 }
 
@@ -294,80 +348,104 @@ pub struct GenotypeArgs {
 #[command(group(ArgGroup::new("plot")))]
 #[command(arg_required_else_help(true))]
 pub struct PlotArgs {
-    #[clap(required = true)]
-    #[clap(short = 'g')]
-    #[clap(long = "genome")]
-    #[clap(help = "Path to reference genome FASTA")]
-    #[clap(value_name = "FASTA")]
-    #[arg(value_parser = check_file_exists)]
+    /// Path to reference genome FASTA
+    #[arg(
+        short = 'g',
+        long = "genome",
+        value_name = "FASTA",
+        value_parser = check_file_exists,
+        required = true
+    )]
     pub genome_path: PathBuf,
 
-    #[clap(required = true)]
-    #[clap(short = 'b')]
-    #[clap(long = "repeats")]
-    #[clap(help = "BED file with repeat coordinates")]
-    #[clap(value_name = "REPEATS")]
-    #[arg(value_parser = check_file_exists)]
+    /// BED file with repeat coordinates
+    #[arg(
+        short = 'b',
+        long = "repeats",
+        value_name = "REPEATS",
+        value_parser = check_file_exists,
+        required = true
+    )]
     pub repeats_path: PathBuf,
 
-    #[clap(required = true)]
-    #[clap(short = 'v')]
-    #[clap(long = "vcf")]
-    #[clap(help = "VCF file generated by TRGT")]
-    #[clap(value_name = "VCF")]
-    #[arg(value_parser = check_file_exists)]
+    /// VCF file generated by TRGT
+    #[arg(
+        short = 'f',
+        long = "vcf",
+        value_name = "VCF",
+        value_parser = check_file_exists,
+        required = true
+    )]
     pub bcf_path: PathBuf,
 
-    #[clap(required = true)]
-    #[clap(short = 'r')]
-    #[clap(long = "spanning-reads")]
-    #[clap(help = "BAM file with spanning reads generated by TRGT")]
-    #[clap(value_name = "SPANNING_READS")]
-    #[arg(value_parser = check_file_exists)]
+    /// BAM file with spanning reads generated by TRGT
+    #[arg(
+        short = 'r',
+        long = "spanning-reads",
+        value_name = "SPANNING_READS",
+        value_parser = check_file_exists,
+        required = true
+    )]
     pub reads_path: PathBuf,
 
-    #[clap(required = true)]
-    #[clap(short = 't')]
-    #[clap(long = "repeat-id")]
-    #[clap(help = "ID of the repeat to plot")]
-    #[clap(value_name = "REPEAT_ID")]
+    /// ID of the repeat to plot
+    #[arg(
+        short = 't',
+        long = "repeat-id",
+        value_name = "REPEAT_ID",
+        required = true
+    )]
     pub tr_id: String,
 
-    #[clap(required = true)]
-    #[clap(short = 'o')]
-    #[clap(long = "image")]
-    #[clap(help = "Output image path")]
-    #[clap(value_name = "IMAGE")]
-    #[arg(value_parser = check_image_path)]
+    /// Output image path
+    #[arg(
+        short = 'o',
+        long = "image",
+        value_name = "IMAGE",
+        value_parser = check_image_path,
+        required = true
+    )]
     pub output_path: PathBuf,
 
-    #[clap(help_heading("Plotting"))]
-    #[clap(long = "plot-type")]
-    #[clap(value_name = "PLOT_TYPE")]
-    #[clap(help = "Type of plot to generate")]
-    #[clap(value_parser(["allele",  "waterfall"]))]
-    #[clap(default_value = "allele")]
+    /// Type of plot to generate
+    #[arg(
+        long = "plot-type",
+        value_name = "PLOT_TYPE",
+        value_parser = ["allele", "waterfall"],
+        default_value = "allele",
+        help_heading = "Plotting"
+    )]
     pub plot_type: String,
 
-    #[clap(help_heading("Plotting"))]
-    #[clap(long = "show")]
-    #[clap(value_name = "SHOW")]
-    #[clap(help = "What to show in the plot")]
-    #[clap(value_parser(["motifs",  "meth"]))]
-    #[clap(default_value = "motifs")]
+    /// What to show in the plot
+    #[arg(
+        long = "show",
+        value_name = "SHOW",
+        value_parser = ["motifs", "meth"],
+        default_value = "motifs",
+        help_heading = "Plotting"
+    )]
     pub what_to_show: String,
 
-    #[clap(help_heading("Advanced"))]
-    #[clap(long = "flank-len")]
-    #[clap(value_name = "FLANK_LEN")]
-    #[clap(help = "Length of flanking regions")]
-    #[clap(default_value = "50")]
+    /// Font family to use for text elements (default: Roboto Mono)
+    #[arg(long = "font-family", value_name = "FONT", help_heading = "Plotting")]
+    pub font_family: Option<String>,
+
+    /// Length of flanking regions
+    #[arg(
+        long = "flank-len",
+        value_name = "FLANK_LEN",
+        default_value = "50",
+        help_heading = "Advanced"
+    )]
     pub flank_len: usize,
 
-    #[clap(help_heading("Advanced"))]
-    #[clap(long = "max-allele-reads")]
-    #[clap(value_name = "MAX_READS")]
-    #[clap(help = "Max number of reads per allele to plot")]
+    /// Max number of reads per allele to plot
+    #[arg(
+        long = "max-allele-reads",
+        value_name = "MAX_READS",
+        help_heading = "Advanced"
+    )]
     pub max_allele_reads: Option<usize>,
 }
 
@@ -375,27 +453,33 @@ pub struct PlotArgs {
 #[command(group(ArgGroup::new("validate")))]
 #[command(arg_required_else_help(true))]
 pub struct ValidateArgs {
-    #[clap(required = true)]
-    #[clap(short = 'g')]
-    #[clap(long = "genome")]
-    #[clap(help = "Path to reference genome FASTA")]
-    #[clap(value_name = "FASTA")]
-    #[arg(value_parser = check_file_exists)]
+    /// Path to reference genome FASTA
+    #[arg(
+        short = 'g',
+        long = "genome",
+        value_name = "FASTA",
+        value_parser = check_file_exists,
+        required = true
+    )]
     pub genome_path: PathBuf,
 
-    #[clap(required = true)]
-    #[clap(short = 'b')]
-    #[clap(long = "repeats")]
-    #[clap(help = "BED file with repeat coordinates")]
-    #[clap(value_name = "REPEATS")]
-    #[arg(value_parser = check_file_exists)]
+    /// BED file with repeat coordinates
+    #[arg(
+        short = 'b',
+        long = "repeats",
+        value_name = "REPEATS",
+        value_parser = check_file_exists,
+        required = true
+    )]
     pub repeats_path: PathBuf,
 
-    #[clap(help_heading("Advanced"))]
-    #[clap(long = "flank-len")]
-    #[clap(value_name = "FLANK_LEN")]
-    #[clap(help = "Length of flanking regions")]
-    #[clap(default_value = "50")]
+    /// Length of flanking regions
+    #[arg(
+        long = "flank-len",
+        value_name = "FLANK_LEN",
+        default_value = "50",
+        help_heading = "Advanced"
+    )]
     pub flank_len: usize,
 }
 
@@ -493,7 +577,7 @@ fn ensure_unit_float(s: &str) -> Result<f64> {
 }
 
 fn scoring_from_string(s: &str) -> Result<TrgtScoring> {
-    const NUM_EXPECTED_VALUES: usize = 6;
+    const NUM_EXPECTED_VALUES: usize = 4;
     let values: Vec<i32> = s.split(',').filter_map(|x| x.parse().ok()).collect();
     if values.len() != NUM_EXPECTED_VALUES {
         return Err(format!(
@@ -516,8 +600,6 @@ fn scoring_from_string(s: &str) -> Result<TrgtScoring> {
         mism_scr: values[1],
         gapo_scr: values[2],
         gape_scr: values[3],
-        kmer_len: values[4] as usize,
-        bandwidth: values[5] as usize,
     })
 }
 
@@ -572,4 +654,41 @@ fn merge_validate_output_type(s: &str) -> Result<OutputType> {
         "Invalid output type: {}. Must be one of u, b, v, z.",
         s
     ))
+}
+
+impl MergeArgs {
+    pub fn process_vcf_paths(&self) -> Result<Vec<PathBuf>> {
+        match (&self.vcfs, &self.vcf_list) {
+            (Some(vcfs), None) => Ok(vcfs.clone()),
+            (None, Some(list_path)) => Self::read_vcf_paths_from_file(list_path),
+            _ => unreachable!("Either --vcf or --vcf-list is provided, never both"),
+        }
+    }
+
+    fn read_vcf_paths_from_file(path: &Path) -> Result<Vec<PathBuf>> {
+        let file = File::open(path)
+            .map_err(|e| format!("Failed to open VCF list file {}: {}", path.display(), e))?;
+        let reader = BufReader::new(file);
+
+        let mut paths = Vec::new();
+        for (line_num, line) in reader.lines().enumerate() {
+            let line = line.map_err(|e| format!("Error reading line {}: {}", line_num + 1, e))?;
+            let trimmed = line.trim();
+            // Skip empty or comment lines
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            let path = PathBuf::from(trimmed);
+            if !path.exists() {
+                Err(format!("VCF file does not exist: {}", path.display()))?;
+            }
+            paths.push(path);
+        }
+
+        if paths.is_empty() {
+            Err("No VCF paths found in the input file".to_string())?;
+        }
+
+        Ok(paths)
+    }
 }

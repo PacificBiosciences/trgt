@@ -13,7 +13,7 @@ pub mod util;
 pub use align::{align, TrgtScoring};
 pub use bam_utils::{get_bam_header, get_sample_name, is_bam_mapped};
 pub use genotyper::Genotyper;
-pub use io_utils::create_writer;
+pub use io_utils::{create_writer, open_bam_reader, open_vcf_reader};
 pub use karyotype::Karyotype;
 pub use math::median;
 pub use ploidy::Ploidy;

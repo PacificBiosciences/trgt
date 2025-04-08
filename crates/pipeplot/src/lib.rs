@@ -8,11 +8,13 @@ PDF images.
 Pipe plots are useful for representing pileups of sequenced reads.
 */
 
+mod common;
 mod image;
 mod pdf;
 mod pipeplot;
 mod png;
 mod svg;
 
+pub use common::prepare_svg_tree;
 pub use image::generate as generate_image;
-pub use pipeplot::{Band, Color, Legend, Pipe, PipePlot, Seg, Shape};
+pub use pipeplot::{Band, Color, FontConfig, Legend, Pipe, PipePlot, Seg, Shape};

@@ -1,9 +1,11 @@
 use super::Result;
 use flate2::read::MultiGzDecoder;
 use rust_htslib::faidx;
-use std::fs::File;
-use std::io::{BufReader, Read as ioRead};
-use std::path::Path;
+use std::{
+    fs::File,
+    io::{BufReader, Read as ioRead},
+    path::Path,
+};
 
 pub fn open_catalog_reader(path: &Path) -> Result<BufReader<Box<dyn ioRead>>> {
     fn is_gzipped(path: &Path) -> bool {

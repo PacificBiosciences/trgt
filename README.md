@@ -95,19 +95,12 @@ tandem repeats at genome scale. 2024](https://www.nature.com/articles/s41587-023
   - The original MAPQ values in the input reads are now reported in the BAM output
   - BAMlet sample name can now be provided using the `--sample-name` flag; if it not provided, it is extracted from the input BAM or file stem (addressing issue #18)
 - 0.8.0
-  - **Breaking change**: Motif spans and counts (`MS` and `MC` fields) and purity assessment (`AP`
-    field) are now performed with an HMM-based algorithm for all repeats; expect
-    some differences in results relative to the previous versions
-  - Allele purity of zero-length alleles are now reported as missing values in
-    the VCFs
-  - The spanning.bam output file now carries over the QUAL values and mapping
-    strand from the input reads
-  - Added an advanced flag `--output-flank-len` that controls the number of
-    flanking bases reported in the spanning.bam files and shown in trvz plots
-  - A crash that may occur on BAMs where methylation was called twice has been
-    fixed
-  - Optimizations to the `--genotyper=cluster` mode, including haploid genotyping
-    of the X chromosome when `--karyotype` is set to `XY`
+  - **Breaking change**: Motif spans and counts (`MS` and `MC` fields) and purity assessment (`AP` field) are now performed with an HMM-based algorithm for all repeats; expect some differences in results relative to the previous versions
+  - Allele purity of zero-length alleles are now reported as missing values in the VCFs
+  - The spanning.bam output file now carries over the QUAL values and mapping strand from the input reads
+  - Added an advanced flag `--output-flank-len` that controls the number of flanking bases reported in the spanning.bam files and shown in trvz plots
+  - A crash that may occur on BAMs where methylation was called twice has been fixed
+  - Optimizations to the `--genotyper=cluster` mode, including haploid genotyping of the X chromosome when `--karyotype` is set to `XY`
 - 0.9.0
   - Add support for polyalanine repeats (by allowing characters `N` in the motif sequence)
   - Fix a bug causing TRVZ to error out on polyalanine repeats
@@ -124,9 +117,9 @@ tandem repeats at genome scale. 2024](https://www.nature.com/articles/s41587-023
   - Fixed a cluster genotyper bug that occurred when only a single read covered a locus.
   - Added new logic for filtering non-HiFi reads: remove up to 3% of lower quality reads that do not match the expected repeat sequence.
 - 1.1.1
-  - Hotfix: Read filtering logic no longer removes reads without RQ tags.
+  - Bug fix: Read filtering logic no longer removes reads without RQ tags.
 - 1.1.2
-  - Hotfix: Prevent genotyping without reads.
+  - Bug fix: Prevent genotyping without reads.
   - Added the `--disable-bam-output` flag to `trgt genotype`, allowing users to disable BAMlet generation. **However, please note that BAMlets are still required for downstream tasks like trgt plot.**
 - 1.2.0
   - `trgt merge`:
@@ -136,12 +129,11 @@ tandem repeats at genome scale. 2024](https://www.nature.com/articles/s41587-023
     - Merging now skips and logs problematic loci by default. Use the `--quit-on-errors` flag to terminate on errors. Statistics are logged post-merge, including counts of failed and skipped TRs.
   - `trgt validate`
     - Always outputs statistics directly to stdout and stderr instead of logging them.
-  - Bug fix:
-    - Resolved issue with handling bgzip-compressed BED files.
+  - Bug fix: resolved issue with handling bgzip-compressed BED files.
 - 1.3.0
   - Plotting code has been refactored as we prepare to revamp repeat visualizations
   - The maximum number of reads per allele to plot can now be specified by `--max-allele-reads`
-  - bugfix: repeat identifiers are now permitted to contain commas
+  - Bug fix: repeat identifiers are now permitted to contain commas
 - 1.4.0
   - Parameters appropriate for targeted sequencing can now be set with `--preset targeted` option
   - Waterfall plots no longer panic when there are no reads in a locus
@@ -152,6 +144,17 @@ tandem repeats at genome scale. 2024](https://www.nature.com/articles/s41587-023
   - Read clustering genotyper (`--genotyper cluster`) is now significantly faster at genotyping high-coverage repeat expansions; this may result in minor changes to consensus sequence and read assignment for highly mosaic repeats
 - 1.5.1
   - Fixed an issue that prevented extraction of CpG methylation from BAM records containing multiple base modifications
+- 2.0.0
+  - **Important changes**:
+    - Introduced fine-grained parallelization using work-stealing, significantly increasing CPU utilization, resulting in speed-ups of up to 200x for targeted datasets
+    - All previous aligners used for genotyping have been replaced with significantly faster and more memory-efficient alternatives from WFA2-lib
+    - When using the targeted data preset, reads with higher repeat purity between flanks are now given priority
+  - TRGT now includes a default monospace font, ensuring consistent text rendering during plotting even on systems without fonts in standard locations.
+  - Added CLI option `--vcf_list` to TRGT merge, allowing users to specify a file containing a list of VCF files. This option is mutually exclusive with the existing `--vcfs` flag.
+  - Introduced CLI option `--font-family` for specifying custom font families when plotting
+  - Bug fix: the VCF QUAL field is now always set with `.` rather than `0`
+  - Bug fix: fixed handling of AL tags when loading spanning BAM files modified by samtools.
+  - Improved error handling and messaging during parsing of plotting inputs
 
 ### DISCLAIMER
 

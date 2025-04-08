@@ -1,23 +1,12 @@
-use super::color::get_meth_colors;
-use super::color::Color;
-use super::color::ColorMap;
-use super::read::project_betas;
-use super::read::Betas;
-use super::{align::Align, locus::Locus, read::Read};
-use crate::trvz::align::AlignOp;
-use crate::trvz::align::AlignSeg;
-use crate::trvz::align::SegType;
-use crate::trvz::read::Beta;
-use bio::alignment::pairwise::Aligner;
-use bio::alignment::Alignment as BioAlign;
-use bio::alignment::AlignmentOperation as BioOp;
+use super::{
+    align::{Align, AlignOp, AlignSeg, SegType},
+    color::{get_meth_colors, Color, ColorMap},
+    locus::Locus,
+    read::{project_betas, Beta, Betas, Read},
+};
+use bio::alignment::{pairwise::Aligner, Alignment as BioAlign, AlignmentOperation as BioOp};
 use itertools::Itertools;
-use pipeplot::Band;
-use pipeplot::Legend;
-use pipeplot::Pipe;
-use pipeplot::PipePlot;
-use pipeplot::Seg;
-use pipeplot::Shape;
+use pipeplot::{Band, FontConfig, Legend, Pipe, PipePlot, Seg, Shape};
 
 pub fn plot_waterfall(
     locus: &Locus,
@@ -50,11 +39,16 @@ fn align(locus: &Locus, longest_read: usize, read: &Read) -> (Align, Vec<Beta>) 
     let tr = &read.seq[locus.left_flank.len()..read.seq.len() - locus.right_flank.len()];
     align.extend(label_motifs(&locus.motifs, tr));
     // Add deletion that lines up right flanks
-    align.push(AlignSeg {
-        width: longest_read - read.seq.len(),
-        op: AlignOp::Del,
-        seg_type: SegType::RightFlank,
-    });
+    let deletion_width = longest_read.saturating_sub(read.seq.len());
+    // prevents adding a 0-width segment
+    if deletion_width > 0 {
+        align.push(AlignSeg {
+            width: deletion_width,
+            op: AlignOp::Del,
+            seg_type: SegType::RightFlank,
+        });
+    }
+
     let rf_bio_align = get_flank_align(rf_ref, rf_read);
     align.extend(convert(&rf_bio_align, SegType::RightFlank));
 
@@ -219,7 +213,11 @@ pub fn plot(
         labels,
     };
 
-    PipePlot { pipes, legend }
+    PipePlot {
+        pipes,
+        legend,
+        font: FontConfig::default(),
+    }
 }
 
 fn get_pipe(
