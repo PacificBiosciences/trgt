@@ -97,7 +97,7 @@ pub fn get_reads(
     let mut read = bam::Record::new();
     while let Some(result) = bam.read(&mut read) {
         result.map_err(|e| e.to_string())?;
-        let read_name = std::str::from_utf8(read.qname()).unwrap();
+        let read_name = std::str::from_utf8(read.qname()).unwrap().to_owned();
         let seq = str::from_utf8(&read.seq().as_bytes()).unwrap().to_string();
 
         let trid = match read.aux(b"TR") {
@@ -155,6 +155,7 @@ pub fn get_reads(
         };
 
         seqs.push(Read {
+            read_name,
             seq,
             left_flank,
             right_flank,
@@ -200,19 +201,28 @@ pub fn get_reads(
 fn get_allele_seqs(locus: &Locus, record: &Record) -> Vec<String> {
     let lf = &locus.left_flank;
     let rf = &locus.right_flank;
-    let mut alleles = Vec::new();
     let genotype = record.genotypes().unwrap().get(0);
-    for allele in genotype.iter() {
-        let allele_index = allele.index().unwrap() as usize;
-        // Remove the padding base
-        let allele_seq = record.alleles()[allele_index]
-            .iter()
-            .skip(1)
-            .copied()
-            .collect_vec();
-        let allele_seq = str::from_utf8(&allele_seq).unwrap();
-        alleles.push(lf.clone() + allele_seq + &rf.clone());
+
+    let indexes = genotype.iter().map(|a| a.index().unwrap()).collect_vec();
+    let mut alleles = indexes
+        .iter()
+        .map(|i| record.alleles()[*i as usize])
+        .collect_vec();
+    // TRGT outputs the shorter allele first (unless the longer allele is ref). So if the first allele is
+    // longer and is alt, the allele ordering must have changed.
+    if indexes.len() == 2 && indexes[0] != 0 && alleles[0].len() > alleles[1].len() {
+        alleles.swap(0, 1);
     }
+
+    let alleles = alleles
+        .into_iter()
+        .map(|allele| {
+            let allele_seq = allele.iter().skip(1).copied().collect_vec();
+            let allele_seq = str::from_utf8(&allele_seq).unwrap();
+            lf.clone() + allele_seq + &rf.clone()
+        })
+        .collect_vec();
+
     alleles
 }
 

@@ -4,7 +4,7 @@ use super::{
     locus::Locus,
     read::{project_betas, Beta, Betas, Read},
 };
-use bio::alignment::{pairwise::Aligner, Alignment as BioAlign, AlignmentOperation as BioOp};
+use crate::wfaligner::{AlignmentScope, MemoryModel, WFAligner, WfaAlign, WfaOp};
 use itertools::Itertools;
 use pipeplot::{Band, FontConfig, Legend, Pipe, PipePlot, Seg, Shape};
 
@@ -14,27 +14,24 @@ pub fn plot_waterfall(
     reads: &[Read],
     colors: &ColorMap,
 ) -> PipePlot {
-    let reads = reads
-        .iter()
-        .sorted_by(|r1, r2| r1.seq.len().cmp(&r2.seq.len()))
-        .collect_vec();
-
-    let longest_read = reads.iter().map(|r| r.seq.len()).max().unwrap();
-    let reads = reads
+    let sorted_reads = reads.iter().sorted_by_key(|r| r.seq.len()).collect_vec();
+    let longest_read = sorted_reads.last().map_or(0, |r| r.seq.len());
+    let aligned_reads = sorted_reads
         .iter()
         .map(|r| align(locus, longest_read, r))
         .collect_vec();
-
-    plot(locus, what_to_show, &reads, colors)
+    plot(locus, what_to_show, &aligned_reads, colors)
 }
 
 fn align(locus: &Locus, longest_read: usize, read: &Read) -> (Align, Vec<Beta>) {
     let lf_ref = locus.left_flank.as_bytes();
     let rf_ref = locus.right_flank.as_bytes();
+
     let lf_read = read.seq[..lf_ref.len()].as_bytes();
     let rf_read = read.seq[read.seq.len() - locus.right_flank.len()..].as_bytes();
-    let lf_bio_align = get_flank_align(lf_ref, lf_read);
-    let mut align = convert(&lf_bio_align, SegType::LeftFlank);
+
+    let lf_wfa_align = get_flank_align(lf_ref, lf_read);
+    let mut align = convert(&lf_wfa_align, SegType::LeftFlank);
     // Placeholder for TR alignment
     let tr = &read.seq[locus.left_flank.len()..read.seq.len() - locus.right_flank.len()];
     align.extend(label_motifs(&locus.motifs, tr));
@@ -49,8 +46,8 @@ fn align(locus: &Locus, longest_read: usize, read: &Read) -> (Align, Vec<Beta>) 
         });
     }
 
-    let rf_bio_align = get_flank_align(rf_ref, rf_read);
-    align.extend(convert(&rf_bio_align, SegType::RightFlank));
+    let rf_wfa_align = get_flank_align(rf_ref, rf_read);
+    align.extend(convert(&rf_wfa_align, SegType::RightFlank));
 
     let mut proj_betas = Vec::new();
 
@@ -60,7 +57,7 @@ fn align(locus: &Locus, longest_read: usize, read: &Read) -> (Align, Vec<Beta>) 
         .filter(|beta| beta.pos < lf_read.len())
         .cloned()
         .collect_vec();
-    proj_betas.extend(project_betas(&lf_bio_align, lf_betas));
+    proj_betas.extend(project_betas(&lf_wfa_align, lf_betas));
 
     let tr_betas = &read
         .betas
@@ -87,7 +84,7 @@ fn align(locus: &Locus, longest_read: usize, read: &Read) -> (Align, Vec<Beta>) 
         .collect_vec();
 
     proj_betas.extend(
-        project_betas(&rf_bio_align, rf_betas)
+        project_betas(&rf_wfa_align, rf_betas)
             .iter()
             .map(|beta| Beta {
                 pos: beta.pos + lf_read.len() + tr.len() + longest_read - read.seq.len(),
@@ -95,7 +92,6 @@ fn align(locus: &Locus, longest_read: usize, read: &Read) -> (Align, Vec<Beta>) 
             }),
     );
 
-    // let mut betas = project_betas(&lf_bio_align, lf_betas);
     assert_eq!(
         read.betas.len(),
         lf_betas.len() + tr_betas.len() + rf_betas.len()
@@ -104,69 +100,70 @@ fn align(locus: &Locus, longest_read: usize, read: &Read) -> (Align, Vec<Beta>) 
     (align, proj_betas)
 }
 
-fn get_flank_align(ref_seq: &[u8], read_seq: &[u8]) -> BioAlign {
-    let likely_max_len = ref_seq.len() + 50;
-    let mut aligner = get_aligner(likely_max_len);
-    aligner.global(read_seq, ref_seq)
+fn get_flank_align(ref_seq: &[u8], read_seq: &[u8]) -> WfaAlign {
+    let mut aligner = WFAligner::builder(AlignmentScope::Alignment, MemoryModel::MemoryHigh)
+        .affine(2, 5, 1)
+        .build();
+    let _status = aligner.align_end_to_end(ref_seq, read_seq);
+    aligner.get_alignment()
 }
 
-/// Convert a rust-bio alignment into an internal alignments
-fn convert(bio_align: &BioAlign, seg_type: SegType) -> Align {
-    assert!(bio_align.xstart == 0);
-    assert!(bio_align.ystart == 0);
+/// Convert a rust-wfa alignment into an internal alignments
+fn convert(wfa_align: &WfaAlign, seg_type: SegType) -> Align {
+    assert!(wfa_align.xstart == 0, "WFA alignment xstart should be 0");
+    assert!(wfa_align.ystart == 0, "WFA alignment ystart should be 0");
 
     let mut align = Vec::new();
     let mut ref_pos = 0;
     let mut seq_pos = 0;
 
-    for (bio_op, group) in &bio_align.operations.iter().group_by(|op| *op) {
+    for (wfa_op, group) in &wfa_align.operations.iter().chunk_by(|op| *op) {
         let run_len = group.count();
 
-        let align_seg = match *bio_op {
-            BioOp::Match => AlignSeg {
+        let align_seg = match *wfa_op {
+            WfaOp::Match => AlignSeg {
                 width: run_len,
                 op: AlignOp::Match,
                 seg_type,
             },
-            BioOp::Subst => AlignSeg {
+            WfaOp::Subst => AlignSeg {
                 width: run_len,
                 op: AlignOp::Subst,
                 seg_type,
             },
-            BioOp::Del => AlignSeg {
+            WfaOp::Del => AlignSeg {
                 width: run_len,
                 op: AlignOp::Del,
                 seg_type,
             },
-            BioOp::Ins => AlignSeg {
+            WfaOp::Ins => AlignSeg {
                 width: 0,
                 op: AlignOp::Ins,
                 seg_type,
             },
-            _ => panic!("No logic to handle {bio_op:?}"),
         };
 
         align.push(align_seg);
 
-        ref_pos += match *bio_op {
-            BioOp::Match => run_len,
-            BioOp::Subst => run_len,
-            BioOp::Del => run_len,
-            BioOp::Ins => 0,
-            _ => panic!("Unhandled operation {:?}", *bio_op),
+        ref_pos += match *wfa_op {
+            WfaOp::Match | WfaOp::Subst | WfaOp::Del => run_len,
+            WfaOp::Ins => 0,
         };
 
-        seq_pos += match *bio_op {
-            BioOp::Match => run_len,
-            BioOp::Subst => run_len,
-            BioOp::Del => 0,
-            BioOp::Ins => run_len,
-            _ => panic!("Unhandled operation {:?}", *bio_op),
+        seq_pos += match *wfa_op {
+            WfaOp::Match | WfaOp::Subst | WfaOp::Ins => run_len,
+            WfaOp::Del => 0,
         };
     }
 
-    assert_eq!(bio_align.x_aln_len(), seq_pos);
-    assert_eq!(bio_align.y_aln_len(), ref_pos);
+    assert_eq!(
+        wfa_align.ylen, seq_pos,
+        "Sequence length mismatch after conversion"
+    );
+    assert_eq!(
+        wfa_align.xlen, ref_pos,
+        "Reference length mismatch after conversion"
+    );
 
     align
 }
@@ -231,15 +228,11 @@ fn get_pipe(
     let segs = align
         .iter()
         .map(|align_seg| {
-            let shape = match align_seg.op {
-                AlignOp::Del => Shape::HLine,
-                AlignOp::Ins => Shape::VLine,
-                AlignOp::Match | AlignOp::Subst => Shape::Rect,
-            };
-            let color = match align_seg.op {
-                AlignOp::Match => colors.get(&align_seg.seg_type).unwrap(),
-                AlignOp::Subst => &Color::Gray,
-                _ => &Color::Black,
+            let (shape, color) = match align_seg.op {
+                AlignOp::Match => (Shape::Rect, colors.get(&align_seg.seg_type).unwrap()),
+                AlignOp::Subst => (Shape::Rect, &Color::Gray),
+                AlignOp::Del => (Shape::HLine, &Color::Black),
+                AlignOp::Ins => (Shape::VLine, &Color::Black),
             };
             Seg {
                 width: align_seg.width as u32,
@@ -311,7 +304,7 @@ fn label_motifs(motifs: &[String], seq: &str) -> Align {
 // TODO: factor out as a generic alignment operation
 fn group(align: &Align) -> Align {
     let mut grouped_align = Vec::new();
-    for ((op, seg_type), group) in &align.iter().group_by(|a| (a.op.clone(), a.seg_type)) {
+    for ((op, seg_type), group) in &align.iter().chunk_by(|a| (a.op.clone(), a.seg_type)) {
         let width = group.into_iter().map(|seg| seg.width).sum();
         grouped_align.push(AlignSeg {
             width,
@@ -320,24 +313,4 @@ fn group(align: &Align) -> Align {
         });
     }
     grouped_align
-}
-
-type ScoreFunc = fn(u8, u8) -> i32;
-
-fn score(a: u8, b: u8) -> i32 {
-    if a == b {
-        1i32
-    } else {
-        -1i32
-    }
-}
-
-fn get_aligner<'a>(likely_max_len: usize) -> Aligner<&'a ScoreFunc> {
-    Aligner::with_capacity(
-        likely_max_len,
-        likely_max_len,
-        -5,
-        -1,
-        &(score as ScoreFunc),
-    )
 }

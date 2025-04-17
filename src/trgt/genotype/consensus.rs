@@ -1,12 +1,8 @@
+use crate::wfaligner::CigarOp;
 use arrayvec::ArrayVec;
-use bio::alignment::AlignmentOperation;
 use itertools::Itertools;
 
-pub fn repair_consensus(
-    reference: &str,
-    seqs: &[&str],
-    aligns: &[Vec<AlignmentOperation>],
-) -> String {
+pub fn repair_consensus(reference: &str, seqs: &[&str], aligns: &[Vec<CigarOp>]) -> String {
     //                                        A  T  C  G  -
     let mut ref_counts = vec![[0, 0, 0, 0, 0]; reference.len()];
     let mut ref_inserts: Vec<Vec<String>> = vec![Vec::new(); reference.len() + 1];
@@ -14,31 +10,33 @@ pub fn repair_consensus(
         let seq = seqs[seq_index];
         let mut x_pos = 0;
         let mut y_pos = 0;
-        for (op, group) in &operations.iter().group_by(|a| *a) {
-            let op_len = group.count();
+        for &(op_len, op) in operations {
             match op {
-                AlignmentOperation::Match => {
+                '=' | 'M' => {
                     let seq_piece = &seq[x_pos..x_pos + op_len];
                     summarize_matches(&mut ref_counts, y_pos, seq_piece);
                     x_pos += op_len;
                     y_pos += op_len;
                 }
-                AlignmentOperation::Subst => {
+                'X' => {
                     let seq_piece = &seq[x_pos..x_pos + op_len];
                     summarize_matches(&mut ref_counts, y_pos, seq_piece);
                     x_pos += op_len;
                     y_pos += op_len;
                 }
-                AlignmentOperation::Del => {
+                'D' => {
                     summarize_dels(&mut ref_counts, y_pos, op_len);
                     y_pos += op_len;
                 }
-                AlignmentOperation::Ins => {
+                'I' => {
                     let seq_piece = &seq[x_pos..x_pos + op_len];
                     ref_inserts[y_pos].push(seq_piece.to_string());
                     x_pos += op_len;
                 }
-                _ => panic!("Unexpected operation"),
+                'N' | 'S' | 'H' | 'P' => {
+                    panic!("Unexpected CIGAR operation: {}", op);
+                }
+                _ => panic!("Unknown CIGAR operation: {}", op),
             };
         }
     }
@@ -98,7 +96,7 @@ fn get_ins_consensus(ins_by_read: &mut [String], num_reads: usize) -> &str {
     let reads_without_ins = num_reads - ins_by_read.len();
     let (top_ins, ins_count) = ins_by_read
         .iter()
-        .group_by(|ins| *ins)
+        .chunk_by(|ins| *ins)
         .into_iter()
         .map(|(ins, group)| (ins, group.count()))
         .sorted_by(|a, b| Ord::cmp(&b.1, &a.1))

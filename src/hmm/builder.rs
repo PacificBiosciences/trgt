@@ -193,7 +193,7 @@ mod tests {
         for (motif_index, group) in &spans
             .iter()
             .map(|s| (s.start, s.end, s.motif_index))
-            .group_by(|(_s, _e, m)| *m)
+            .chunk_by(|(_s, _e, m)| *m)
         {
             let group = group.collect_vec();
             summary.push((

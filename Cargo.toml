@@ -1,8 +1,13 @@
 [package]
-name = "trgt"
-version = "2.0.0"
-edition = "2021"
+version = "2.1.0"
 build = "build.rs"
+name = "trgt"
+authors = [
+    "Egor Dolzhenko <edolzhenko@pacificbiosciences.com>, Guilherme De Sena Brandine <gbrandine@pacificbiosciences.com>, Tom Mokveld <tmokveld@pacificbiosciences.com>",
+]
+description = "Tandem repeat genotyping tool for HiFi sequencing data"
+license-file = "LICENSE.md"
+edition = "2021"
 
 [workspace]
 members = ["crates/pipeplot"]
@@ -10,22 +15,23 @@ members = ["crates/pipeplot"]
 [build-dependencies]
 vergen = { version = "8.2", features = ["git", "gitcl"] }
 
+[dev-dependencies]
+tempfile = "3"
+
 [dependencies]
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.5", features = ["derive", "suggestions"] }
 rust-htslib = { version = "0.46", default-features = false }
-itertools = "0.12"
-bio = "1.6"
+itertools = "0.14.0"
 env_logger = "0.10"
 log = "0.4"
 chrono = "0.4"
 arrayvec = "0.7"
 kodama = "0.3"
-rand = "0.8"
-once_cell = "1.18"
-flate2 = "1.0"
+rand = "0.9"
+once_cell = "1.21"
+flate2 = "1.1"
 rayon = "1.10"
 crossbeam-channel = "0.5"
-pipeplot = { path = "crates/pipeplot" }
 semver = "1.0"
-tempfile = "3"
+pipeplot = { path = "crates/pipeplot" }
 wfa2-sys = { version = "0.1.0", git = "https://github.com/ctsa/rust-wfa2.git", rev = "4342b3b06278656fa51c0a33b4eb0b67d53bfa8c" }

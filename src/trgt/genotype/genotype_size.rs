@@ -67,11 +67,10 @@ fn get_len_hist(seqs: &[&str]) -> (Vec<usize>, Vec<usize>) {
     let sorted_lens = seqs.iter().map(|seq| seq.len()).sorted().collect_vec();
     let mut unique_lens = Vec::new();
     let mut unique_len_counts = Vec::new();
-    for (len, group) in &sorted_lens.iter().group_by(|l| **l) {
+    for (len, group) in &sorted_lens.iter().chunk_by(|l| **l) {
         unique_lens.push(len);
         unique_len_counts.push(group.count());
     }
-
     (unique_lens, unique_len_counts)
 }
 
@@ -79,12 +78,11 @@ fn get_seq_hist(mut seqs: Vec<&str>) -> (Vec<&str>, Vec<usize>) {
     seqs.sort();
     let mut unique_seqs = Vec::new();
     let mut seq_counts = Vec::new();
-    for (seq, seqs) in &seqs.iter().group_by(|s| **s) {
+    for (seq, seqs) in &seqs.iter().chunk_by(|s| **s) {
         let count = seqs.count();
         unique_seqs.push(seq);
         seq_counts.push(count);
     }
-
     (unique_seqs, seq_counts)
 }
 

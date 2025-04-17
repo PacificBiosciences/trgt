@@ -2,7 +2,7 @@ use super::{consensus, Gt, TrSize};
 use crate::{
     commands::genotype::THREAD_WFA_ED,
     utils::{align, Ploidy},
-    wfa_aligner::WFAligner,
+    wfaligner::WFAligner,
 };
 use arrayvec::ArrayVec;
 use itertools::Itertools;
@@ -67,14 +67,13 @@ pub fn genotype(ploidy: Ploidy, trs: &[&str]) -> (Gt, Vec<String>, Vec<i32>) {
             let gt = Gt::from(size);
             return (gt, vec![allele], classifications);
         }
-
         // one read, two alleles
         let gt = Gt::from([size.clone(), size]);
         return (gt, vec![allele.clone(), allele], classifications);
     }
     let mut groups = cluster(num_seqs, &mut dists);
 
-    assert!(groups.len() >= 2);
+    debug_assert!(groups.len() >= 2);
     groups.sort_by_key(|a| a.len());
 
     let group1 = groups.pop().unwrap();
@@ -119,7 +118,6 @@ pub fn genotype(ploidy: Ploidy, trs: &[&str]) -> (Gt, Vec<String>, Vec<i32>) {
     }
 
     // assign outlier reads (discarded in cluster()) to the closest consensus
-    // avoid constant conversion
     let a1 = allele1.as_bytes();
     let a2 = allele2.as_bytes();
 
@@ -154,8 +152,8 @@ pub fn genotype(ploidy: Ploidy, trs: &[&str]) -> (Gt, Vec<String>, Vec<i32>) {
 }
 
 pub fn cluster(num_seqs: usize, dists: &mut [f64]) -> Vec<Vec<usize>> {
-    assert!(num_seqs >= 2);
-    assert_eq!(num_seqs * (num_seqs - 1) / 2, dists.len());
+    debug_assert!(num_seqs >= 2);
+    debug_assert_eq!(num_seqs * (num_seqs - 1) / 2, dists.len());
     if num_seqs == 2 {
         return vec![vec![0], vec![1]];
     }
@@ -260,16 +258,15 @@ fn get_dist_matrix(trs: &[&[u8]]) -> Vec<f64> {
     let results_per_thread: Vec<Vec<(usize, f64)>> = (0..n)
         .into_par_iter()
         .map(|i| {
-            // Calculate the base index part for the current i once before the inner loop, index for pair (i, j) in condensed upper triangle matrix
-            // This represents the number of elements before the start of row 'i' in the condensed matrix, adjusted so that adding 'j' gives the final index.
-            let base_index_for_i = i * n - (i * (i + 1)) / 2 - (i + 1);
+            let condensed_index_offset = i * n - (i * (i + 1)) / 2;
             let mut thread_results = Vec::new();
             THREAD_WFA_ED.with(|aligner_cell| {
                 // Access thread local and borrow ONCE per thread's chunk of i values, the inner loop reuses the same aligner instance
                 let mut aligner = aligner_cell.borrow_mut();
                 for j in (i + 1)..n {
                     let dist = get_dist(trs[i], trs[j], &mut aligner);
-                    let index = base_index_for_i + j;
+                    // Index for pair (i, j) in the condensed 1D vector
+                    let index = condensed_index_offset + (j - i - 1);
                     thread_results.push((index, dist));
                 }
             });
@@ -277,19 +274,84 @@ fn get_dist_matrix(trs: &[&[u8]]) -> Vec<f64> {
         })
         .collect();
 
-    // Flatten the results, bound check commented out.
+    // Flatten the results
     let mut dists = vec![0.0; dist_len];
     for thread_batch in results_per_thread {
         for (index, dist) in thread_batch {
             dists[index] = dist;
-            // if index < dist_len {
-            //     dists[index] = dist;
-            // } else {
-            //     // This should never happen if the index calculation is correct
-            //     log::error!("Calculated index {} out of bounds ({})", index, dist_len,);
-            // }
         }
     }
-    assert_eq!(dists.len(), dist_len);
+    debug_assert_eq!(dists.len(), dist_len);
     dists
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::wfaligner::{AlignmentScope, MemoryModel};
+    use rand::{distr::Uniform, Rng};
+
+    const EPSILON: f64 = 1e-9;
+    fn generate_random_dna(rng: &mut impl Rng, min_len: usize, max_len: usize) -> Vec<u8> {
+        let len = rng.random_range(min_len..=max_len);
+        let range = Uniform::try_from(0..4).unwrap();
+        rng.sample_iter(&range)
+            .map(|n| match n {
+                0 => b'A',
+                1 => b'C',
+                2 => b'G',
+                _ => b'T',
+            })
+            .take(len)
+            .collect()
+    }
+
+    fn get_dist_matrix_simple(trs: &[&[u8]]) -> Vec<f64> {
+        let n = trs.len();
+        if n < 2 {
+            return Vec::new();
+        }
+        let dist_len = n * (n - 1) / 2;
+        let mut dists = Vec::with_capacity(dist_len);
+        let mut aligner = WFAligner::builder(AlignmentScope::Score, MemoryModel::MemoryUltraLow)
+            .edit()
+            .build();
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let dist = get_dist(trs[i], trs[j], &mut aligner);
+                dists.push(dist);
+            }
+        }
+        assert_eq!(dists.len(), dist_len);
+        dists
+    }
+
+    #[test]
+    fn test_get_dist_matrix_correctness() {
+        let mut rng = rand::rng();
+        let num_seqs = 10;
+        let min_len = 50;
+        let max_len = 150;
+        let sequences: Vec<Vec<u8>> = (0..num_seqs)
+            .map(|_| generate_random_dna(&mut rng, min_len, max_len))
+            .collect();
+        let trs: Vec<&[u8]> = sequences.iter().map(|s| s.as_slice()).collect();
+        let simple_dists = get_dist_matrix_simple(&trs);
+        let optimized_dists = get_dist_matrix(&trs);
+        assert_eq!(optimized_dists.len(), simple_dists.len(),);
+
+        for (i, (opt_dist, simple_dist)) in
+            optimized_dists.iter().zip(simple_dists.iter()).enumerate()
+        {
+            let diff = (opt_dist - simple_dist).abs();
+            assert!(
+                diff < EPSILON,
+                "Mismatch at index {}: optimized={}, simple={}, diff={}",
+                i,
+                opt_dist,
+                simple_dist,
+                diff
+            );
+        }
+    }
 }

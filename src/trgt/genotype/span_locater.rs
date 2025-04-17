@@ -18,7 +18,7 @@ fn find_spans(piece: &[u8], seqs: &[&[u8]], threshold_frac: f64) -> Vec<Option<(
                         let flank_aln_len = aligner.count_matches() as usize;
                         if flank_aln_len as f64 >= threshold_frac {
                             let ((_pattern_start, _pattern_end), (text_start, text_end)) =
-                                aligner.find_alignment_span();
+                                aligner.get_alignment_span();
                             Some((text_start, text_end))
                         } else {
                             None

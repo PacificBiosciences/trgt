@@ -35,8 +35,6 @@ impl VcfWriter {
             },
         };
 
-        log::debug!("{:?}", &output_type);
-
         let writer = match output {
             Some(path) => {
                 let (is_uncompressed, format) = match output_type {

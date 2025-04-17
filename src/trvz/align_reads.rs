@@ -1,11 +1,7 @@
-use super::align::Align;
-use super::align::{AlignOp, AlignSeg};
+use super::align::{Align, AlignOp, AlignSeg};
 use super::read::{project_betas, Betas, Read};
-use bio::alignment::pairwise::Aligner;
-use bio::alignment::Alignment as BioAlign;
+use crate::wfaligner::{AlignmentScope, MemoryModel, WFAligner, WfaAlign, WfaOp};
 use itertools::Itertools;
-
-type BioOp = bio::alignment::AlignmentOperation;
 
 /// Align reads to the consensus sequence
 pub fn align_reads(
@@ -13,24 +9,26 @@ pub fn align_reads(
     consensus_align: &[AlignSeg],
     reads: &[&Read],
 ) -> Vec<(Align, Betas)> {
-    let likely_max_len = consensus.len() + 50;
-    let mut aligner = get_aligner(likely_max_len);
-    let mut read_aligns = Vec::new();
+    let mut aligner = WFAligner::builder(AlignmentScope::Alignment, MemoryModel::MemoryHigh)
+        .affine(2, 5, 1)
+        .build();
 
-    for read in reads {
-        let bio_align = aligner.global(read.seq.as_bytes(), consensus.as_bytes());
-        let align = convert(consensus_align, &bio_align);
-        let betas = project_betas(&bio_align, &read.betas);
-        read_aligns.push((align, betas));
-    }
-
-    read_aligns
+    reads
+        .iter()
+        .map(|read| {
+            let _status = aligner.align_end_to_end(consensus.as_bytes(), read.seq.as_bytes());
+            let wfa_align = aligner.get_alignment();
+            let align = convert(consensus_align, &wfa_align);
+            let betas = project_betas(&wfa_align, &read.betas);
+            (align, betas)
+        })
+        .collect()
 }
 
-/// Convert a rust-bio alignment into an internal alignment
-fn convert(consensus_align: &[AlignSeg], bio_align: &BioAlign) -> Align {
-    assert!(bio_align.xstart == 0);
-    assert!(bio_align.ystart == 0);
+/// Convert a WFA alignment into an internal alignment
+fn convert(consensus_align: &[AlignSeg], wfa_align: &WfaAlign) -> Align {
+    assert!(wfa_align.xstart == 0, "WFA alignment xstart should be 0");
+    assert!(wfa_align.ystart == 0, "WFA alignment ystart should be 0");
 
     let mut seg_type_by_ref = Vec::new();
     for align_seg in consensus_align {
@@ -42,98 +40,72 @@ fn convert(consensus_align: &[AlignSeg], bio_align: &BioAlign) -> Align {
     }
 
     let mut ref_pos = 0;
-    let mut ops_and_segs = Vec::new();
-    for op in &bio_align.operations {
+    let mut ops_and_segs = Vec::with_capacity(wfa_align.operations.len());
+    for op in &wfa_align.operations {
         let seg_type = if ref_pos == seg_type_by_ref.len() {
             // Handle trailing insertion
-            assert_eq!(*op, BioOp::Ins);
+            assert_eq!(*op, WfaOp::Ins);
             seg_type_by_ref[ref_pos - 1]
         } else {
             seg_type_by_ref[ref_pos]
         };
         ops_and_segs.push((*op, seg_type));
         ref_pos += match *op {
-            BioOp::Match => 1,
-            BioOp::Subst => 1,
-            BioOp::Del => 1,
-            BioOp::Ins => 0,
-            _ => panic!("Unhandled operation {op:?}"),
+            WfaOp::Match | WfaOp::Subst | WfaOp::Del => 1,
+            WfaOp::Ins => 0,
         };
     }
 
     let mut align = Vec::new();
     let mut ref_pos = 0;
     let mut seq_pos = 0;
-
-    for ((bio_op, seg_type), group) in &ops_and_segs.iter().group_by(|rec| *rec) {
+    for ((wfa_op, seg_type), group) in &ops_and_segs.iter().chunk_by(|rec| *rec) {
         let seg_type = *seg_type;
         let run_len = group.count();
 
-        let align_seg = match *bio_op {
-            BioOp::Match => AlignSeg {
+        let align_seg = match *wfa_op {
+            WfaOp::Match => AlignSeg {
                 width: run_len,
                 op: AlignOp::Match,
                 seg_type,
             },
-            BioOp::Subst => AlignSeg {
+            WfaOp::Subst => AlignSeg {
                 width: run_len,
                 op: AlignOp::Subst,
                 seg_type,
             },
-            BioOp::Del => AlignSeg {
+            WfaOp::Del => AlignSeg {
                 width: run_len,
                 op: AlignOp::Del,
                 seg_type,
             },
-            BioOp::Ins => AlignSeg {
+            WfaOp::Ins => AlignSeg {
                 width: 0,
                 op: AlignOp::Ins,
                 seg_type,
             },
-            _ => panic!("No logic to handle {bio_op:?}"),
         };
-
         align.push(align_seg);
 
-        ref_pos += match *bio_op {
-            BioOp::Match => run_len,
-            BioOp::Subst => run_len,
-            BioOp::Del => run_len,
-            BioOp::Ins => 0,
-            _ => panic!("Unhandled operation {:?}", *bio_op),
+        ref_pos += match *wfa_op {
+            WfaOp::Match | WfaOp::Subst | WfaOp::Del => run_len,
+            WfaOp::Ins => 0,
         };
 
-        seq_pos += match *bio_op {
-            BioOp::Match => run_len,
-            BioOp::Subst => run_len,
-            BioOp::Del => 0,
-            BioOp::Ins => run_len,
-            _ => panic!("Unhandled operation {:?}", *bio_op),
+        seq_pos += match *wfa_op {
+            WfaOp::Match | WfaOp::Subst | WfaOp::Ins => run_len,
+            WfaOp::Del => 0,
         };
     }
 
-    assert_eq!(bio_align.x_aln_len(), seq_pos);
-    assert_eq!(bio_align.y_aln_len(), ref_pos);
+    assert_eq!(
+        wfa_align.ylen, seq_pos,
+        "Sequence length mismatch after conversion"
+    );
+    assert_eq!(
+        wfa_align.xlen, ref_pos,
+        "Reference length mismatch after conversion"
+    );
 
     align
-}
-
-type ScoreFunc = fn(u8, u8) -> i32;
-
-fn score(a: u8, b: u8) -> i32 {
-    if a == b {
-        1i32
-    } else {
-        -1i32
-    }
-}
-
-fn get_aligner<'a>(likely_max_len: usize) -> Aligner<&'a ScoreFunc> {
-    Aligner::with_capacity(
-        likely_max_len,
-        likely_max_len,
-        -5,
-        -1,
-        &(score as ScoreFunc),
-    )
 }

@@ -7,9 +7,7 @@ use crate::trgt::{
 use crate::utils::{
     create_writer, get_bam_header, get_sample_name, is_bam_mapped, Karyotype, Result, TrgtScoring,
 };
-use crate::wfa_aligner::{
-    AlignmentScope, Heuristic, MemoryModel, WFAligner, WFAlignerEdit, WFAlignerGapAffine,
-};
+use crate::wfaligner::{AlignmentScope, Heuristic, MemoryModel, WFAligner};
 use crossbeam_channel::{bounded, Sender};
 use rayon::{
     iter::{ParallelBridge, ParallelIterator},
@@ -58,34 +56,25 @@ fn create_thread_local_ga_aligner_with_scoring() -> WFAligner {
             .as_ref()
             .expect("Thread context parameters not initialized for WFA gap affine aligner")
             .clone();
-
         let scoring = &ctx.flank_scoring;
-        let mut aligner = WFAlignerGapAffine::create_aligner_with_match(
-            scoring.match_scr,
-            scoring.mism_scr,
-            scoring.gapo_scr,
-            scoring.gape_scr,
-            AlignmentScope::Alignment,
-            MemoryModel::MemoryHigh,
-        );
-        aligner.set_heuristic(Heuristic::None);
-        aligner
+
+        WFAligner::builder(AlignmentScope::Alignment, MemoryModel::MemoryHigh)
+            .affine(scoring.mism_scr, scoring.gapo_scr, scoring.gape_scr)
+            .with_heuristic(Heuristic::None)
+            .build()
     })
 }
 
 fn create_thread_local_ga_aligner() -> WFAligner {
-    WFAlignerGapAffine::create_aligner_with_match(
-        -1,
-        1,
-        5,
-        1,
-        AlignmentScope::Alignment,
-        MemoryModel::MemoryUltraLow,
-    )
+    WFAligner::builder(AlignmentScope::Alignment, MemoryModel::MemoryUltraLow)
+        .affine(2, 5, 1)
+        .build()
 }
 
 fn create_thread_local_ed() -> WFAligner {
-    WFAlignerEdit::create_aligner(AlignmentScope::Score, MemoryModel::MemoryUltraLow)
+    WFAligner::builder(AlignmentScope::Score, MemoryModel::MemoryUltraLow)
+        .edit()
+        .build()
 }
 
 thread_local! {

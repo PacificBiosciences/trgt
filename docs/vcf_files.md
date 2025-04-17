@@ -12,7 +12,7 @@ consists of the fields described in the table below.
 | ID        | Region identifier (currently set to ".")                      |
 | REF       | The full reference sequence of the region                     |
 | ALT       | Sequences of the repeat alleles                               |
-| QUAL      | Currently always set to 0                                     |
+| QUAL      | Currently always set to "."                                     |
 | FILTER    | Currently always set to "."                                   |
 | INFO      | Fields describing the overall properties of the TR region     |
 | FORMAT    | Names of genotype fields describing the region in the sample  |

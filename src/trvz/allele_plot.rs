@@ -117,7 +117,7 @@ fn get_scales(
     xpos += bounds.first().unwrap().start as u32;
     let mut segs = Vec::new();
 
-    for (motif_index, group) in &bounds.iter().group_by(|bound| bound.motif_index) {
+    for (motif_index, group) in &bounds.iter().chunk_by(|bound| bound.motif_index) {
         let mut tick_index = 0;
         for bound in group {
             if tick_index % tick_spacing == 0 {
@@ -156,7 +156,7 @@ fn get_scales(
     let mut culled_segs = Vec::new();
     for (is_tick, group) in &segs
         .into_iter()
-        .group_by(|seg| matches!(seg.shape, Shape::Tick(_)))
+        .chunk_by(|seg| matches!(seg.shape, Shape::Tick(_)))
     {
         if is_tick {
             culled_segs.push(group.last().unwrap());

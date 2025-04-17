@@ -2,11 +2,10 @@ use super::{Allele, Genotype, LocusResult};
 use crate::hmm::{
     build_hmm, calc_purity, collapse_labels, count_motifs, replace_invalid_bases, Annotation, Hmm,
 };
-use crate::trgt::reads::get_rq_tag;
 use crate::trgt::{
     genotype::{find_tr_spans, genotype_cluster, genotype_flank, genotype_size, Gt},
     locus::Locus,
-    reads::HiFiRead,
+    reads::{get_rq_tag, HiFiRead},
 };
 use crate::utils::{Genotyper, Ploidy, Result};
 use itertools::{izip, Itertools};
@@ -326,7 +325,7 @@ fn extract_reads(
                         continue;
                     }
 
-                    let j = rng.gen_range(0..n_reads);
+                    let j = rng.random_range(0..n_reads);
                     if j < reservoir_threshold {
                         reads[j] = HiFiRead::from_hts_rec(&record, &locus.region);
                     }

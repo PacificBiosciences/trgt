@@ -6,4 +6,4 @@ pub mod trgt;
 pub mod trvz;
 pub mod utils;
 pub mod wfa2;
-pub mod wfa_aligner;
+pub mod wfaligner;

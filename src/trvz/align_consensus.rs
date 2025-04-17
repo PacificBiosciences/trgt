@@ -4,8 +4,7 @@ use crate::hmm::{build_hmm, get_events, HmmEvent};
 use crate::trvz::align::SegType;
 use itertools::Itertools;
 
-/// Aligns a given allele to a perfect repeat as specified by the locus
-/// definition
+/// Aligns a given allele to a perfect repeat as specified by the locus definition
 pub fn align_consensus(locus: &Locus, consensus: &str) -> (Vec<AlignSeg>, Vec<MotifBound>) {
     let mut align = vec![AlignSeg {
         width: locus.left_flank.len(),
@@ -37,8 +36,7 @@ pub fn align_consensus(locus: &Locus, consensus: &str) -> (Vec<AlignSeg>, Vec<Mo
     (align, motif_bounds)
 }
 
-/// Aligns the given sequence to a perfect repeat composed of the given set of
-/// motifs
+/// Aligns the given sequence to a perfect repeat composed of the given set of motifs
 fn align_motifs(motifs: &[Vec<u8>], seq: &str) -> (Vec<AlignSeg>, Vec<MotifBound>) {
     if seq.is_empty() {
         return (Vec::new(), Vec::new());
@@ -57,7 +55,7 @@ fn align_motifs(motifs: &[Vec<u8>], seq: &str) -> (Vec<AlignSeg>, Vec<MotifBound
     let mut bound_events = Vec::new();
     let mut base_pos = 0;
 
-    for (event, group) in &events.iter().group_by(|e| *e) {
+    for (event, group) in &events.iter().chunk_by(|e| *e) {
         let seg_type = if base_pos < motif_by_base.len() {
             SegType::Tr(motif_by_base[base_pos])
         } else {
@@ -114,7 +112,7 @@ fn align_motifs(motifs: &[Vec<u8>], seq: &str) -> (Vec<AlignSeg>, Vec<MotifBound
     let mut merged_align = Vec::new();
     let iter = align
         .into_iter()
-        .group_by(|seg| (seg.op.clone(), seg.seg_type));
+        .chunk_by(|seg| (seg.op.clone(), seg.seg_type));
     for ((op, segment), group) in &iter {
         let width: usize = group.into_iter().map(|s| s.width).sum();
         merged_align.push(AlignSeg {

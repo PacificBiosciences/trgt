@@ -267,12 +267,12 @@ pub struct GenotypeArgs {
     )]
     pub genotyper: Genotyper,
 
-    /// Scoring function to align to flanks (non-negative values): MATCH,MISM,GAPO,GAPE
+    /// Scoring function to align to flanks (non-negative values): MISM,GAPO,GAPE
     #[arg(
          long = "aln-scoring",
          value_name = "SCORING",
-         default_value = "0,2,6,2",
-         default_value_if("preset", "targeted", Some("0,1,0,1")),
+         default_value = "2,5,1",
+         default_value_if("preset", "targeted", Some("1,0,1")),
          value_parser = scoring_from_string,
          help_heading = "Advanced",
          hide = true
@@ -577,7 +577,7 @@ fn ensure_unit_float(s: &str) -> Result<f64> {
 }
 
 fn scoring_from_string(s: &str) -> Result<TrgtScoring> {
-    const NUM_EXPECTED_VALUES: usize = 4;
+    const NUM_EXPECTED_VALUES: usize = 3;
     let values: Vec<i32> = s.split(',').filter_map(|x| x.parse().ok()).collect();
     if values.len() != NUM_EXPECTED_VALUES {
         return Err(format!(
@@ -596,10 +596,9 @@ fn scoring_from_string(s: &str) -> Result<TrgtScoring> {
     }
 
     Ok(TrgtScoring {
-        match_scr: values[0],
-        mism_scr: values[1],
-        gapo_scr: values[2],
-        gape_scr: values[3],
+        mism_scr: values[0],
+        gapo_scr: values[1],
+        gape_scr: values[2],
     })
 }
 

@@ -39,7 +39,7 @@ impl BamWriter {
         Ok(BamWriter { writer, flank_len })
     }
 
-    /// Creates a BAM header based on a template, including additional program information..
+    /// Creates a BAM header based on a template, including additional program information.
     ///
     /// # Arguments
     ///

@@ -1,8 +1,8 @@
-use bio::alignment::Alignment as BioAlign;
-use bio::alignment::AlignmentOperation as BioOp;
+use crate::wfaligner::{WfaAlign, WfaOp};
 
 #[derive(Clone)]
 pub struct Read {
+    pub read_name: String,
     pub seq: String,
     pub left_flank: usize,
     pub right_flank: usize,
@@ -21,7 +21,7 @@ pub struct Beta {
 /// Convert betas from read coordinates to allele coordinates
 /// according to the provided alignment between the read and
 /// the allele consensus sequence
-pub fn project_betas(bio_align: &BioAlign, betas: &Betas) -> Betas {
+pub fn project_betas(bio_align: &WfaAlign, betas: &Betas) -> Betas {
     if betas.is_empty() {
         return Vec::new();
     }
@@ -32,7 +32,7 @@ pub fn project_betas(bio_align: &BioAlign, betas: &Betas) -> Betas {
     let mut proj_betas = Vec::new();
     for op in &bio_align.operations {
         let at_pos = betas[beta_index].pos == seq_pos;
-        let is_visible = *op == BioOp::Match || *op == BioOp::Subst;
+        let is_visible = *op == WfaOp::Match || *op == WfaOp::Subst;
         if at_pos && is_visible {
             let beta = Beta {
                 pos: ref_pos,
@@ -48,19 +48,17 @@ pub fn project_betas(bio_align: &BioAlign, betas: &Betas) -> Betas {
         }
 
         seq_pos += match *op {
-            BioOp::Match => 1,
-            BioOp::Subst => 1,
-            BioOp::Del => 0,
-            BioOp::Ins => 1,
-            _ => panic!("Unhandled operation {:?}", *op),
+            WfaOp::Match => 1,
+            WfaOp::Subst => 1,
+            WfaOp::Del => 0,
+            WfaOp::Ins => 1,
         };
 
         ref_pos += match *op {
-            BioOp::Match => 1,
-            BioOp::Subst => 1,
-            BioOp::Del => 1,
-            BioOp::Ins => 0,
-            _ => panic!("Unhandled operation {op:?}"),
+            WfaOp::Match => 1,
+            WfaOp::Subst => 1,
+            WfaOp::Del => 1,
+            WfaOp::Ins => 0,
         };
     }
 
