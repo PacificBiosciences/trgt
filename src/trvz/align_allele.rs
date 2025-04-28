@@ -5,10 +5,10 @@ use super::locus::Locus;
 use super::read::Read;
 
 pub fn get_allele_align(locus: &Locus, consensus: &str, reads: &[&Read]) -> AlleleAlign {
-    let (consensus_align, motif_bounds) = align_consensus(locus, consensus);
+    let consensus_align = align_consensus(locus, consensus);
     let read_aligns = align_reads(consensus, &consensus_align, reads);
     AlleleAlign {
-        seq: (consensus_align, motif_bounds),
+        seq: consensus_align,
         reads: read_aligns,
     }
 }

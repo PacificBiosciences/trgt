@@ -61,7 +61,7 @@ mod tests {
         let query = "CAGCGCAGCCGCCGCCGGG";
         let states = hmm.label(query);
         let purity = calc_purity(query.as_bytes(), &hmm, &motifs, &states);
-        assert_eq!(purity, 18.0 / 21.0);
+        assert_eq!(purity, 17.0 / 20.0);
     }
 
     #[test]

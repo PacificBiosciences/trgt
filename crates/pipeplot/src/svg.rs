@@ -84,18 +84,22 @@ impl Generator {
     fn plot_pipe(&mut self, pipe: &Pipe, font: &FontConfig) {
         let x = self.to_x(pipe.xpos) + self.pad;
         let y = self.to_y(pipe.ypos) + self.pad;
+        let add_highlight = pipe.height > 1;
         let pipe_height = self.to_y(pipe.height);
-
+        let stroke = if pipe.height > 1 { 1.5 } else { 1.0 };
         // Plot the main pipe
         let mut x_cur = x;
 
         for seg in &pipe.segs {
             let dims = (self.to_x(seg.width), pipe_height);
-            match seg.shape {
-                Shape::Rect => self.add_rect((x_cur, y), dims, &seg.color, true),
-                Shape::HLine => self.add_hline((x_cur, y), dims, &seg.color, 1.5),
-                Shape::Tick(label) => self.add_tick((x_cur, y), dims, &seg.color, label, font),
+            match &seg.shape {
+                Shape::Rect => self.add_rect((x_cur, y), dims, &seg.color, add_highlight),
+                Shape::HLine => self.add_hline((x_cur, y), dims, &seg.color, stroke),
+                Shape::Tick(label) => self.add_tick((x_cur, y), dims, &seg.color, *label, font),
                 Shape::None | Shape::VLine => {}
+                Shape::DoubleArrow(label) => {
+                    self.add_double_arrow((x_cur, y), dims, &seg.color, stroke, label)
+                }
             }
 
             x_cur += self.to_x(seg.width);
@@ -184,6 +188,48 @@ impl Generator {
 
         let line = format!("<line {} {} {} />", x1y1, x2y2, style);
         self.add_line(&line);
+    }
+
+    fn add_double_arrow(
+        &mut self,
+        pos: (f64, f64),
+        dims: (f64, f64),
+        color: &Color,
+        stroke: f64,
+        label: &Option<String>,
+    ) {
+        let x1 = pos.0;
+        let x2 = pos.0 + dims.0;
+        let y1 = pos.1 + dims.1 / 2.0;
+        let y2 = y1;
+
+        let x1y1 = format!("x1=\"{}\" y1=\"{}\"", x1, y1);
+        let x2y2 = format!("x2=\"{}\" y2=\"{}\"", x2, y2);
+
+        let style = format!("stroke=\"{}\" stroke-width=\"{}\"", color, stroke);
+
+        let line = format!("<line {} {} {} />", x1y1, x2y2, style);
+        self.add_line(&line);
+
+        let arrow_pt1 = format!("{} {}", x1, y1);
+        let arrow_pt2 = format!("{} {}", x1 + 5.0, y1 + 5.0);
+        let arrow_pt3 = format!("{} {}", x1 + 5.0, y1 - 5.0);
+        let left_arrow = format!("<polygon points=\"{arrow_pt1}, {arrow_pt2}, {arrow_pt3}\"/>");
+        self.add_line(&left_arrow);
+
+        let arrow_pt1 = format!("{} {}", x2, y2);
+        let arrow_pt2 = format!("{} {}", x2 - 5.0, y2 - 5.0);
+        let arrow_pt3 = format!("{} {}", x2 - 5.0, y2 + 5.0);
+        let right_arrow = format!("<polygon points=\"{arrow_pt1}, {arrow_pt2}, {arrow_pt3}\"/>");
+        self.add_line(&right_arrow);
+
+        if let Some(label) = label {
+            let point = format!("x=\"{}\" y=\"{}\"", (x1 + x2) / 2.0, pos.1);
+            let height = r#"font-size="14px""#;
+            let style = r#"font-family="monospace" font-weight="bold" text-anchor="middle""#;
+            let line = format!("<text {} {} {} >{}</text>", point, style, height, label);
+            self.add_line(&line);
+        }
     }
 
     fn add_tick(

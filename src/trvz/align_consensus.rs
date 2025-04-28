@@ -1,11 +1,12 @@
-use super::align::{AlignOp, AlignSeg, MotifBound};
+use super::align::{AlignOp, AlignSeg};
 use super::locus::Locus;
-use crate::hmm::{build_hmm, get_events, HmmEvent};
+use crate::hmm::{build_hmm, get_events, remove_imperfect_motifs, HmmEvent};
 use crate::trvz::align::SegType;
 use itertools::Itertools;
 
-/// Aligns a given allele to a perfect repeat as specified by the locus definition
-pub fn align_consensus(locus: &Locus, consensus: &str) -> (Vec<AlignSeg>, Vec<MotifBound>) {
+/// Aligns a given allele to a perfect repeat as specified by the locus
+/// definition
+pub fn align_consensus(locus: &Locus, consensus: &str) -> Vec<AlignSeg> {
     let mut align = vec![AlignSeg {
         width: locus.left_flank.len(),
         op: AlignOp::Match,
@@ -18,32 +19,27 @@ pub fn align_consensus(locus: &Locus, consensus: &str) -> (Vec<AlignSeg>, Vec<Mo
         .map(|m| m.as_bytes().to_vec())
         .collect_vec();
     let query = &consensus[locus.left_flank.len()..consensus.len() - locus.right_flank.len()];
-    let (query_align, motif_bounds) = align_motifs(&motifs, query);
-    let motif_bounds = motif_bounds
-        .into_iter()
-        .map(|bound| MotifBound {
-            start: locus.left_flank.len() + bound.start,
-            end: locus.left_flank.len() + bound.end,
-            motif_index: bound.motif_index,
-        })
-        .collect_vec();
+    let query_align = align_motifs(&motifs, query);
+
     align.extend(query_align);
     align.push(AlignSeg {
         width: locus.right_flank.len(),
         op: AlignOp::Match,
         seg_type: SegType::RightFlank,
     });
-    (align, motif_bounds)
+    align
 }
 
-/// Aligns the given sequence to a perfect repeat composed of the given set of motifs
-fn align_motifs(motifs: &[Vec<u8>], seq: &str) -> (Vec<AlignSeg>, Vec<MotifBound>) {
+/// Aligns the given sequence to a perfect repeat composed of the given set of
+/// motifs
+pub fn align_motifs(motifs: &[Vec<u8>], seq: &str) -> Vec<AlignSeg> {
     if seq.is_empty() {
-        return (Vec::new(), Vec::new());
+        return Vec::new();
     }
 
     let hmm = build_hmm(motifs);
     let states = hmm.label(seq);
+    let states = remove_imperfect_motifs(&hmm, motifs, &states, seq.as_bytes(), 6);
     let motif_spans = hmm.label_motifs(&states);
     let mut motif_by_base = vec![motifs.len(); seq.len()];
     for span in motif_spans {
@@ -122,20 +118,5 @@ fn align_motifs(motifs: &[Vec<u8>], seq: &str) -> (Vec<AlignSeg>, Vec<MotifBound
         });
     }
 
-    let motif_bounds = bound_events
-        .chunks(2)
-        .map(|rec| {
-            let (start, end) = rec
-                .iter()
-                .collect_tuple()
-                .expect("Unexpected motif segmentation");
-            MotifBound {
-                start: start.1,
-                end: end.1,
-                motif_index: start.2,
-            }
-        })
-        .collect();
-
-    (merged_align, motif_bounds)
+    merged_align
 }

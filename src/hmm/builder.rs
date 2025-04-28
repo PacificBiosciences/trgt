@@ -17,10 +17,10 @@ pub fn build_hmm(motifs: &[Vec<u8>]) -> Hmm {
     hmm.set_trans(end, vec![re], vec![0.10]);
 
     hmm.set_ems(rs, vec![0.00, 0.00, 0.00, 0.00, 0.00]);
-    hmm.set_trans(rs, vec![start, re], vec![1.00, 0.90]);
+    hmm.set_trans(rs, vec![start, re], vec![1.00, 1.00]);
 
-    let rs_to_ms = 0.50; // / (motifs.len() as f64 + 1.0); <- No longer an HMM because of this change
-    let me_to_re = 0.05;
+    let rs_to_ms = 1.00;
+    let me_to_re = 0.50;
     let mut mes = Vec::with_capacity(motifs.len() + 1);
     let mut ms = rs + 1;
     for motif in motifs {
@@ -43,7 +43,7 @@ pub fn build_hmm(motifs: &[Vec<u8>]) -> Hmm {
     hmm.set_ems(ms, vec![0.00, 0.00, 0.00, 0.00, 0.00]);
     hmm.set_trans(ms, vec![rs, me], vec![rs_to_ms, 1.0 - me_to_re]);
 
-    let skip_to_skip = 0.9;
+    let skip_to_skip = 0.5;
     hmm.set_ems(skip_state, vec![0.00, 0.25, 0.25, 0.25, 0.25]);
     hmm.set_trans(skip_state, vec![ms, skip_state], vec![1.0, skip_to_skip]);
 
@@ -186,7 +186,7 @@ fn get_match_emissions(base: u8) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hmm::spans::Span;
+    use crate::hmm::{remove_imperfect_motifs, spans::Span};
 
     fn summarize(spans: &[Span]) -> Vec<(usize, usize, usize)> {
         let mut summary = Vec::new();
@@ -219,8 +219,22 @@ mod tests {
     fn annotate_motif_runs_separated_by_insertion() {
         let motifs = vec!["CAG".as_bytes().to_vec(), "A".as_bytes().to_vec()];
         let hmm = build_hmm(&motifs);
-        let labels = hmm.label_motifs(&hmm.label("CAGCAGATCGATCGATCGATCGAAAAA"));
-        let expected = vec![(0, 6, 0), (6, 22, 2), (22, 27, 1)];
+        let query = "CAGCAGATCGATCGATCGATCGAAAAA";
+        let states = hmm.label(query);
+        let states = remove_imperfect_motifs(&hmm, &motifs, &states, query.as_bytes(), 6);
+        let labels = hmm.label_motifs(&states);
+        let expected = vec![
+            (0, 6, 0),
+            (6, 7, 1),
+            (7, 10, 2),
+            (10, 11, 1),
+            (11, 14, 2),
+            (14, 15, 1),
+            (15, 18, 2),
+            (18, 19, 1),
+            (19, 22, 2),
+            (22, 27, 1),
+        ];
 
         assert_eq!(summarize(&labels), expected);
     }
@@ -230,7 +244,7 @@ mod tests {
         let motifs = vec!["CAG".as_bytes().to_vec(), "A".as_bytes().to_vec()];
         let hmm = build_hmm(&motifs);
         let labels = hmm.label_motifs(&hmm.label("CAGCAGCTGCAGCAGAAACAG"));
-        let expected = vec![(0, 21, 0)];
+        let expected = vec![(0, 15, 0), (15, 18, 1), (18, 21, 0)];
 
         assert_eq!(summarize(&labels), expected);
     }
@@ -241,14 +255,18 @@ mod tests {
         let motifs = vec!["AAG".as_bytes().to_vec(), "CAAC".as_bytes().to_vec()];
         let hmm = build_hmm(&motifs);
         let query = "TCTATGCAACCAACTTTCTGTTAGTCATAGTACCCCAAGAAGAAGAAGAAGAAGAAGAAGAAGAAGAAGAAGAAGAAGAAGAAGAAGAAGAAGAATAGAAATGTGTTTAAGAATTCCTCAATAAG";
-        let labels = hmm.label_motifs(&hmm.label(query));
+        let states = hmm.label(query);
+        let states = remove_imperfect_motifs(&hmm, &motifs, &states, query.as_bytes(), 6);
+        let labels = hmm.label_motifs(&states);
         let expected = vec![
             (0, 6, 2),
             (6, 14, 1),
             (14, 36, 2),
-            (36, 101, 0),
-            (101, 119, 2),
-            (119, 125, 0),
+            (36, 93, 0),
+            (93, 108, 2),
+            (108, 111, 0),
+            (111, 122, 2),
+            (122, 125, 0),
         ];
 
         assert_eq!(summarize(&labels), expected);

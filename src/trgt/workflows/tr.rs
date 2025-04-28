@@ -1,6 +1,7 @@
 use super::{Allele, Genotype, LocusResult};
 use crate::hmm::{
-    build_hmm, calc_purity, collapse_labels, count_motifs, replace_invalid_bases, Annotation, Hmm,
+    build_hmm, calc_purity, collapse_labels, count_motifs, remove_imperfect_motifs,
+    replace_invalid_bases, Annotation, Hmm,
 };
 use crate::trgt::{
     genotype::{find_tr_spans, genotype_cluster, genotype_flank, genotype_size, Gt},
@@ -464,6 +465,7 @@ fn label_with_hmm(locus: &Locus, seqs: &Vec<String>) -> Vec<Annotation> {
         let seq = replace_invalid_bases(seq, &['A', 'T', 'C', 'G']);
         let labels = hmm.label(&seq);
         let purity = calc_purity(seq.as_bytes(), &hmm, &motifs, &labels);
+        let labels = remove_imperfect_motifs(&hmm, &motifs, &labels, seq.as_bytes(), 6);
         let labels = hmm.label_motifs(&labels);
         // Remove labels corresponding to the skip state
         let labels = labels

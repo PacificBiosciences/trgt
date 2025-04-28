@@ -2,15 +2,8 @@ use super::read::Betas;
 
 #[derive(Debug, Clone)]
 pub struct AlleleAlign {
-    pub seq: (Align, Vec<MotifBound>),
+    pub seq: Align,
     pub reads: Vec<(Align, Betas)>,
-}
-
-#[derive(Debug, Clone)]
-pub struct MotifBound {
-    pub start: usize,
-    pub end: usize,
-    pub motif_index: usize,
 }
 
 pub type Align = Vec<AlignSeg>;

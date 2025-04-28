@@ -25,6 +25,7 @@ use std::{
 struct ThreadContextParams {
     flank_scoring: TrgtScoring,
     reads_path: PathBuf,
+    genome_path: PathBuf,
 }
 
 thread_local! {
@@ -32,20 +33,33 @@ thread_local! {
 }
 
 fn create_thread_local_bam_reader() -> bam::IndexedReader {
-    let path = CTX_PARAMS.with(|ctx_cell| {
-        ctx_cell
+    CTX_PARAMS.with(|ctx_cell| {
+        let ctx = ctx_cell
             .borrow()
             .as_ref()
-            .expect("Thread context parameters not initialized for BAM path")
-            .reads_path
-            .clone()
-    });
-    bam::IndexedReader::from_path(&path).unwrap_or_else(|e| {
-        panic!(
-            "Failed to initialize BAM reader for path {}: {}",
-            path.display(),
-            e
-        )
+            .expect("Thread context parameters not initialized for BAM reader")
+            .clone();
+
+        let reads_path = ctx.reads_path;
+        let genome_path = ctx.genome_path;
+
+        let mut reader = bam::IndexedReader::from_path(&reads_path).unwrap_or_else(|e| {
+            panic!(
+                "Failed to initialize BAM/CRAM reader for path {}: {}",
+                reads_path.display(),
+                e
+            )
+        });
+
+        if let Err(e) = reader.set_reference(&genome_path) {
+            panic!(
+                "Failed to set reference '{}' for CRAM reader on '{}': {}",
+                genome_path.display(),
+                reads_path.display(),
+                e
+            );
+        }
+        reader
     })
 }
 
@@ -91,6 +105,12 @@ thread_local! {
 const CHANNEL_BUFFER_SIZE: usize = 2048;
 
 pub fn trgt(args: GenotypeArgs) -> crate::utils::Result<()> {
+    let thread_context = ThreadContextParams {
+        flank_scoring: args.aln_scoring,
+        reads_path: args.reads_path.clone(),
+        genome_path: args.genome_path.clone(),
+    };
+
     let karyotype = Karyotype::new(&args.karyotype)?;
 
     let bam_header = get_bam_header(&args.reads_path)?;
@@ -155,13 +175,7 @@ pub fn trgt(args: GenotypeArgs) -> crate::utils::Result<()> {
         args.num_threads
     );
 
-    let pool = initialize_thread_pool(
-        args.num_threads,
-        ThreadContextParams {
-            flank_scoring: args.aln_scoring,
-            reads_path: args.reads_path.clone(),
-        },
-    )?;
+    let pool = initialize_thread_pool(args.num_threads, thread_context)?;
     pool.install(|| {
         receiver_locus
             .into_iter()

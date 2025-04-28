@@ -427,6 +427,10 @@ pub struct PlotArgs {
     )]
     pub what_to_show: String,
 
+    /// Horizontally compress the plot
+    #[arg(long = "squished", help_heading = "Plotting")]
+    pub is_squished: bool,
+
     /// Font family to use for text elements (default: Roboto Mono)
     #[arg(long = "font-family", value_name = "FONT", help_heading = "Plotting")]
     pub font_family: Option<String>,

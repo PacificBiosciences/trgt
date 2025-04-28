@@ -5,6 +5,7 @@ pub enum Shape {
     VLine,
     None,
     Tick(Option<u32>),
+    DoubleArrow(Option<String>),
 }
 
 pub type Color = String;

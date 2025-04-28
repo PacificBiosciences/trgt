@@ -1,5 +1,5 @@
 use crate::cli::PlotArgs;
-use crate::trvz::color::pick_colors;
+use crate::trvz::params::pick_params;
 use crate::trvz::waterfall_plot::plot_waterfall;
 use crate::trvz::{allele_plot::plot_alleles, input};
 use crate::utils::{open_catalog_reader, open_genome_reader, Result};
@@ -11,12 +11,12 @@ pub fn trvz(args: PlotArgs) -> Result<()> {
     let locus = input::get_locus(catalog_reader, genome_reader, &args.tr_id, args.flank_len)?;
 
     let reads = input::get_reads(&args.reads_path, &locus, args.max_allele_reads)?;
-    let colors = pick_colors(&locus.motifs);
+    let params = pick_params(&locus.motifs, args.is_squished);
     let mut pipe_plot = if args.plot_type == "allele" {
         let allele_seqs = input::get_alleles(&args.bcf_path, &locus)?;
-        plot_alleles(&locus, &args.what_to_show, &allele_seqs, &reads, colors)
+        plot_alleles(&locus, &args.what_to_show, &allele_seqs, &reads, params)
     } else {
-        plot_waterfall(&locus, &args.what_to_show, &reads, &colors)
+        plot_waterfall(&locus, &args.what_to_show, &reads, &params)
     };
 
     if let Some(font_family) = args.font_family {

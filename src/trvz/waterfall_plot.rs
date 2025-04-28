@@ -1,10 +1,21 @@
-use super::{
-    align::{Align, AlignOp, AlignSeg, SegType},
-    color::{get_meth_colors, Color, ColorMap},
-    locus::Locus,
-    read::{project_betas, Beta, Betas, Read},
-};
-use crate::wfaligner::{AlignmentScope, MemoryModel, WFAligner, WfaAlign, WfaOp};
+use super::params::get_meth_colors;
+use super::params::Color;
+use super::params::ColorMap;
+use super::params::PlotParams;
+use super::read::project_betas;
+use super::read::Betas;
+use super::scale::get_scale;
+use super::{align::Align, locus::Locus, read::Read};
+use crate::trvz::align::AlignOp;
+use crate::trvz::align::AlignSeg;
+use crate::trvz::align::SegType;
+use crate::trvz::align_consensus::align_motifs;
+use crate::trvz::read::Beta;
+use crate::wfaligner::AlignmentScope;
+use crate::wfaligner::MemoryModel;
+use crate::wfaligner::WFAligner;
+use crate::wfaligner::WfaAlign;
+use crate::wfaligner::WfaOp;
 use itertools::Itertools;
 use pipeplot::{Band, FontConfig, Legend, Pipe, PipePlot, Seg, Shape};
 
@@ -12,15 +23,20 @@ pub fn plot_waterfall(
     locus: &Locus,
     what_to_show: &str,
     reads: &[Read],
-    colors: &ColorMap,
+    params: &PlotParams,
 ) -> PipePlot {
-    let sorted_reads = reads.iter().sorted_by_key(|r| r.seq.len()).collect_vec();
-    let longest_read = sorted_reads.last().map_or(0, |r| r.seq.len());
-    let aligned_reads = sorted_reads
+    let reads = reads
+        .iter()
+        .sorted_by(|r1, r2| r1.seq.len().cmp(&r2.seq.len()))
+        .collect_vec();
+
+    let longest_read = reads.iter().map(|r| r.seq.len()).max().unwrap();
+    let reads = reads
         .iter()
         .map(|r| align(locus, longest_read, r))
         .collect_vec();
-    plot(locus, what_to_show, &aligned_reads, colors)
+
+    plot(locus, what_to_show, &reads, params)
 }
 
 fn align(locus: &Locus, longest_read: usize, read: &Read) -> (Align, Vec<Beta>) {
@@ -34,7 +50,13 @@ fn align(locus: &Locus, longest_read: usize, read: &Read) -> (Align, Vec<Beta>) 
     let mut align = convert(&lf_wfa_align, SegType::LeftFlank);
     // Placeholder for TR alignment
     let tr = &read.seq[locus.left_flank.len()..read.seq.len() - locus.right_flank.len()];
-    align.extend(label_motifs(&locus.motifs, tr));
+    let motif_encoding = &locus
+        .motifs
+        .iter()
+        .map(|m| m.as_bytes().to_vec())
+        .collect_vec();
+    let motif_aligns = align_motifs(motif_encoding, tr);
+    align.extend(motif_aligns);
     // Add deletion that lines up right flanks
     let deletion_width = longest_read.saturating_sub(read.seq.len());
     // prevents adding a 0-width segment
@@ -172,27 +194,29 @@ pub fn plot(
     locus: &Locus,
     what_to_show: &str,
     reads: &[(Align, Vec<Beta>)],
-    colors: &ColorMap,
+    params: &PlotParams,
 ) -> PipePlot {
-    let height = 4;
     let xpos = 0;
     let mut ypos = 0;
     let mut pipes = Vec::new();
+    let pipe = get_scale(xpos, ypos, params.pipe_height, &reads.last().unwrap().0);
+    pipes.push(pipe);
+    ypos += 4;
     for (align, betas) in reads {
         let (colors, betas) = if what_to_show == "meth" {
             (get_meth_colors(&locus.motifs), betas.clone())
         } else {
-            (colors.clone(), Vec::new())
+            (params.colors.clone(), Vec::new())
         };
-        let pipe = get_pipe(xpos, ypos, height, align, &betas, &colors);
+        let pipe = get_pipe(xpos, ypos, params.pipe_height, align, &betas, &colors);
         pipes.push(pipe);
-        ypos += 5;
+        ypos += params.pipe_height + params.pipe_pad;
     }
 
     let mut labels = Vec::new();
     if what_to_show == "motifs" {
         for (index, motif) in locus.motifs.iter().enumerate() {
-            let color = colors.get(&SegType::Tr(index)).unwrap().to_string();
+            let color = params.colors.get(&SegType::Tr(index)).unwrap().to_string();
             labels.push((motif.clone(), color));
         }
     } else {
@@ -206,7 +230,7 @@ pub fn plot(
     let legend = Legend {
         xpos,
         ypos,
-        height,
+        height: 4,
         labels,
     };
 
@@ -228,11 +252,16 @@ fn get_pipe(
     let segs = align
         .iter()
         .map(|align_seg| {
-            let (shape, color) = match align_seg.op {
-                AlignOp::Match => (Shape::Rect, colors.get(&align_seg.seg_type).unwrap()),
-                AlignOp::Subst => (Shape::Rect, &Color::Gray),
-                AlignOp::Del => (Shape::HLine, &Color::Black),
-                AlignOp::Ins => (Shape::VLine, &Color::Black),
+            let shape = match align_seg.op {
+                AlignOp::Del => Shape::HLine,
+                AlignOp::Ins => Shape::VLine,
+                AlignOp::Match | AlignOp::Subst => Shape::Rect,
+            };
+            let color = match align_seg.op {
+                AlignOp::Match => colors.get(&align_seg.seg_type).unwrap(),
+                AlignOp::Subst => &Color::Gray,
+                AlignOp::Del => &Color::LightGray,
+                _ => &Color::Black,
             };
             Seg {
                 width: align_seg.width as u32,
@@ -259,58 +288,4 @@ fn get_pipe(
         bands,
         outline: false,
     }
-}
-
-fn label_motifs(motifs: &[String], seq: &str) -> Align {
-    // Preserve motif order after sorting
-    let mut motifs = motifs.iter().enumerate().collect_vec();
-    motifs.sort_by_key(|(_c, m)| std::cmp::Reverse(m.len()));
-
-    let mut align = Vec::new();
-    let mut pos = 0;
-    while pos != seq.len() {
-        let mut motif_found = false;
-        for (motif_index, motif) in &motifs {
-            if pos + motif.len() > seq.len() {
-                continue;
-            }
-
-            if &seq[pos..pos + motif.len()] == *motif {
-                align.push(AlignSeg {
-                    width: motif.len(),
-                    op: AlignOp::Match,
-                    seg_type: SegType::Tr(*motif_index),
-                });
-
-                motif_found = true;
-                pos += motif.len();
-                break;
-            }
-        }
-
-        if !motif_found {
-            align.push(AlignSeg {
-                width: 1,
-                op: AlignOp::Match,
-                seg_type: SegType::Tr(motifs.len()),
-            });
-            pos += 1;
-        }
-    }
-
-    group(&align)
-}
-
-// TODO: factor out as a generic alignment operation
-fn group(align: &Align) -> Align {
-    let mut grouped_align = Vec::new();
-    for ((op, seg_type), group) in &align.iter().chunk_by(|a| (a.op.clone(), a.seg_type)) {
-        let width = group.into_iter().map(|seg| seg.width).sum();
-        grouped_align.push(AlignSeg {
-            width,
-            op,
-            seg_type,
-        });
-    }
-    grouped_align
 }

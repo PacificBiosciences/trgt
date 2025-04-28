@@ -3,7 +3,31 @@ use std::{collections::HashMap, fmt};
 
 pub type ColorMap = HashMap<SegType, Color>;
 
-pub fn pick_colors(motifs: &[String]) -> ColorMap {
+pub struct PlotParams {
+    pub colors: ColorMap,
+    pub pipe_height: u32,
+    pub pipe_pad: u32,
+}
+
+pub fn pick_params(motifs: &[String], is_squished: bool) -> PlotParams {
+    let colors = pick_colors(motifs);
+
+    if !is_squished {
+        PlotParams {
+            colors,
+            pipe_height: 4,
+            pipe_pad: 1,
+        }
+    } else {
+        PlotParams {
+            colors,
+            pipe_height: 1,
+            pipe_pad: 0,
+        }
+    }
+}
+
+fn pick_colors(motifs: &[String]) -> ColorMap {
     let tr_colors = [
         Color::Blue,
         Color::Purple,
@@ -25,7 +49,7 @@ pub fn pick_colors(motifs: &[String]) -> ColorMap {
         let color = tr_colors[index % tr_colors.len()].clone();
         colors.insert(SegType::Tr(index), color);
     }
-    colors.insert(SegType::Tr(motifs.len()), Color::Gray);
+    colors.insert(SegType::Tr(motifs.len()), Color::LightGray);
 
     colors
 }
@@ -36,7 +60,7 @@ pub fn get_meth_colors(motifs: &[String]) -> ColorMap {
     colors.insert(SegType::RightFlank, Color::Teal);
 
     for index in 0..motifs.len() + 1 {
-        colors.insert(SegType::Tr(index), Color::Gray);
+        colors.insert(SegType::Tr(index), Color::LightGray);
     }
 
     colors
@@ -68,7 +92,7 @@ impl fmt::Display for Color {
             Color::Blue => write!(formatter, "#1383C6"),
             Color::Orange => write!(formatter, "#E16A2C"),
             Color::Teal => write!(formatter, "#009CA2"),
-            Color::Gray => write!(formatter, "#BABABA"),
+            Color::Gray => write!(formatter, "#7E7F7F"),
             Color::LightGray => write!(formatter, "#D1D1D1"),
             Color::Black => write!(formatter, "#000000"),
             Color::Pink => write!(formatter, "#ED3981"),

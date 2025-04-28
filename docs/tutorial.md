@@ -13,12 +13,13 @@ tiny example dataset included in this repository.
 
 Our example dataset consists of a reference genome (`reference.fasta`), a file
 with aligned reads (`sample.bam`), and the repeat definition file
-(`repeat.bed`). The repeat definitions are stored in a BED file that, among
-other information, contains repeat coordinates, repeat identifiers, and motifs:
+(`repeat.bed`). The repeat definitions are stored in a BED file that, contains
+repeat coordinates, repeat identifiers, and motifs (the `STRUC` field can be
+always set to value `<TR>`).
 
 ```bash
 $ cat repeat.bed
-chrA    10000    10061    ID=TR1;MOTIFS=CAG;STRUC=(CAG)n
+chrA    10000    10061    ID=TR1;MOTIFS=CAG;STRUC=<TR>
 ```
 
 ## Genotype repeats
@@ -33,26 +34,27 @@ To genotype the repeat, run:
 ```
 
 The output consists of files `sample.vcf.gz` and `sample.spanning.bam`. The VCF
-file contains repeat genotypes while the BAM file contains pieces of HiFi reads
-that fully span the repeat sequences.
+file contains repeat genotypes while the BAM file contains portions of HiFi
+reads that fully span the repeat sequences.
 
 For example, here is the first entry of the VCF file:
 
 ```bash
 $ bcftools view --no-header sample.vcf.gz | head -n 1
 #CHROM  POS  ID  REF  ALT  QUAL  FILTER  INFO  FORMAT  sample
-chrA  10002  .  CAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAG  CAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAG,CAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAG  0  .  TRID=TR1;END=10061;MOTIFS=CAG;STRUC=(CAG)n  GT:AL:ALCI:SD:MC:MS:AP:AM  1/1:33,33:30-39,33-33:16,16:11,11:0(0-33),0(0-33):1,1:.,.
+chrA  10001  .  CCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAG   CCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAG  .  .  TRID=TR1;END=10061;MOTIFS=CAG;STRUC=<TR>  GT:AL:ALLR:SD:MC:MS:AP:AM  1/1:33,33:30-39,33-33:15,14:11,11:0(0-33),0(0-33):1.000000,1.000000:.,.
 ```
 
-It says that:
+TRGT adds a padding base to each repeat allele (the first base of the allele
+sequence). After excluding this padding base, we see that:
 
 - There is a tandem repeat starting at position 10001 of chrA
-- The reference sequence of this repeat is CCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAG
-- This repeat has two alleles spanning 16 CAG motifs each
+- The reference sequence of this repeat is CAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAG
+- This repeat has two identical alleles CAGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAG consisting of 11 CAGs each
 
 ## Sort and index the outputs
 
-TRGT genotyping outputs are not sorted. So you need to sort and index the VCF:
+The outputs of TRGT are not sorted. So you need to sort and index the VCF:
 
 ```bash
 bcftools sort -Ob -o sample.sorted.vcf.gz sample.vcf.gz
@@ -85,7 +87,7 @@ TRGT outputs a file `TR1.svg` that contains the read pileup image. Note that the
 SVG file can be directly edited in vector graphics editing software like
 [Inkscape](https://inkscape.org/).
 
-The resulting pileup plot shows the sequences of reads spanning each repeat 
+The resulting pileup plot shows the sequences of reads spanning each repeat
 allele (blue) and the surrounding flanking sequence (green):
 
 ![TR1 read pileup](figures/TR1.png)

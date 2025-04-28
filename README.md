@@ -6,9 +6,10 @@
 
 TRGT is a tool for targeted genotyping of tandem repeats from PacBio HiFi data.
 In addition to the basic size genotyping, TRGT profiles sequence composition,
-mosaicism, and CpG methylation of each analyzed repeat and visualization of reads overlapping the repeats.
+mosaicism, and CpG methylation of each analyzed repeat and visualization of
+reads overlapping the repeats.
 
-## Early version warning
+## Active development warning
 
 Please note that TRGT is still under active development. We anticipate some
 changes to the input and output file formats of TRGT.
@@ -16,8 +17,17 @@ changes to the input and output file formats of TRGT.
 ## Availability
 
 - TRGT Linux binary is [available here](https://github.com/PacificBiosciences/trgt/releases)
-- Repeat definition files are available in [this Zenodo repository](https://zenodo.org/record/8329210)
-  and definitions of known pathogenic repeats are [also available here](repeats/).
+
+## Repeat catalogs
+
+In order to use TRGT, you need to specify which repeats you want it to analyze.
+Here are some repeat catalogs that you can use.
+
+- [STRchive](https://strchive.org/loci/) is a high-quality catalog containing
+  definitions of known pathogenic repeats. It is described [here](https://genomemedicine.biomedcentral.com/articles/10.1186/s13073-025-01454-4).
+- ["Adotto" genome-wide repeat catalog](<https://zenodo.org/records/8329210>) described in the original TRGT paper and [here](https://pubmed.ncbi.nlm.nih.gov/38671154/).
+- [Genome-wide repeat catalog containing isolated tandem repeats and variation clusters](https://github.com/broadinstitute/tandem-repeat-catalog/releases) described [here](https://www.biorxiv.org/content/10.1101/2024.10.04.615514v1).
+- [Catalog of pathogenic repeats](repeats/pathogenic_repeats.hg38.bed) originally distributed with TRGT has been deprecated; please use STRchive.
 
 ## Joint analysis of multiple samples
 
@@ -156,9 +166,19 @@ tandem repeats at genome scale. 2024](https://www.nature.com/articles/s41587-023
   - Bug fix: fixed handling of AL tags when loading spanning BAM files modified by samtools
   - Improved error handling and messaging during parsing of plotting inputs
 - 2.1.0
-    - **Important changes**: 
-      - Extended the use of optimized aligners to the plotting (TRVZ) functionality
-      - Further optimized alignments, significantly improving overall performance for targeted datasets beyond the improvements introduced in 2.0, and cumulatively achieving ~2x speed-up for whole-genome sequencing data
+  - **Important changes**:
+    - Extended the use of optimized aligners to the plotting (TRVZ) functionality
+    - Further optimized alignments, significantly improving overall performance for targeted datasets beyond the improvements introduced in 2.0, and cumulatively achieving ~2x speed-up for whole-genome sequencing data
+- 3.0.0
+  - **Breaking change**: Modified how TRGT detects repeat motifs
+    - Changed repeat segmentation algorithm to only match perfect STR motifs (imperfections in VNTR motifs are still allowed)
+    - Implemented more flexible motif matching that allows better detection and visualization of repeat interruptions
+  - Made a number of improvements to TRGT plots
+    - Replaced the size scale with the overall allele length
+    - Implemented more accurate motif matching in waterfall plots
+    - Made it possible to compress the plots vertically (useful for high-depth targeted data)
+    - Made it easier to distinguish between mismatches and unsegmented regions
+  - Bug fix: Explicitly set reference from genome path for CRAM input, avoiding issues with moved/renamed references
 
 ### DISCLAIMER
 

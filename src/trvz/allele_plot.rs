@@ -1,13 +1,10 @@
-use super::{
-    align::{MotifBound, SegType},
-    align_allele::get_allele_align,
-    color::{get_meth_colors, Color, ColorMap},
-    read::{Betas, Read},
-};
-use crate::trvz::{
-    align::{Align, AlignOp},
-    locus::Locus,
-};
+use super::align::SegType;
+use super::align_allele::get_allele_align;
+use super::params::{get_meth_colors, Color, ColorMap, PlotParams};
+use super::read::{Betas, Read};
+use super::scale::get_scale;
+use crate::trvz::align::{Align, AlignOp};
+use crate::trvz::locus::Locus;
 use itertools::Itertools;
 use pipeplot::{Band, FontConfig, Legend, Pipe, PipePlot, Seg, Shape};
 
@@ -16,7 +13,7 @@ pub fn plot_alleles(
     what_to_show: &str,
     allele_seqs: &[String],
     reads: &[Read],
-    colors: ColorMap,
+    params: PlotParams,
 ) -> PipePlot {
     let aligns_by_allele = allele_seqs
         .iter()
@@ -29,50 +26,51 @@ pub fn plot_alleles(
             get_allele_align(locus, allele_seq, &allele_reads)
         })
         .collect_vec();
-    let bounds_by_allele = aligns_by_allele
-        .iter()
-        .map(|align| &align.seq.1)
-        .collect_vec();
-    let tick_spacing = get_tick_spacing(&bounds_by_allele);
 
-    let height = 4;
+    let allele_height = 4;
     let xpos = 0;
     let mut ypos = 0;
     let mut pipes = Vec::new();
     for (allele_index, allele) in aligns_by_allele.iter().enumerate() {
-        let pipe = get_scales(
-            xpos,
-            ypos,
-            height / 3,
-            tick_spacing,
-            locus.motifs.len(),
-            &allele.seq.1,
-        );
+        let pipe = get_scale(xpos, ypos, allele_height, &allele.seq);
         pipes.push(pipe);
-        ypos += height / 3;
+        ypos += allele_height;
         let pipe = get_pipe(
             xpos,
             ypos,
-            height,
-            &allele.seq.0,
+            allele_height,
+            &allele.seq,
             &Vec::new(),
-            &colors,
+            &params.colors,
             true,
         );
         pipes.push(pipe);
-        ypos += 5;
+        ypos += allele_height + params.pipe_pad;
+
+        // Add extra padding if pipes are bookended
+        if params.pipe_pad == 0 {
+            ypos += 1;
+        }
 
         // TODO: Confirm that this allele / index correspondence is always correct
         for (align, betas) in &allele.reads {
             let (colors, betas) = if what_to_show == "meth" {
                 (get_meth_colors(&locus.motifs), betas.clone())
             } else {
-                (colors.clone(), Vec::new())
+                (params.colors.clone(), Vec::new())
             };
 
-            let pipe = get_pipe(xpos, ypos, height, align, &betas, &colors, false);
+            let pipe = get_pipe(
+                xpos,
+                ypos,
+                params.pipe_height,
+                align,
+                &betas,
+                &colors,
+                false,
+            );
             pipes.push(pipe);
-            ypos += 5;
+            ypos += params.pipe_height + params.pipe_pad;
         }
 
         if allele_index + 1 != aligns_by_allele.len() {
@@ -82,7 +80,7 @@ pub fn plot_alleles(
 
     let mut labels = Vec::new();
     for (index, motif) in locus.motifs.iter().enumerate() {
-        let color = colors.get(&SegType::Tr(index)).unwrap().to_string();
+        let color = params.colors.get(&SegType::Tr(index)).unwrap().to_string();
         labels.push((motif.clone(), color));
     }
     if what_to_show == "meth" {
@@ -95,7 +93,7 @@ pub fn plot_alleles(
     let legend = Legend {
         xpos,
         ypos,
-        height,
+        height: allele_height,
         labels,
     };
 
@@ -103,75 +101,6 @@ pub fn plot_alleles(
         pipes,
         legend,
         font: FontConfig::default(),
-    }
-}
-
-fn get_scales(
-    mut xpos: u32,
-    ypos: u32,
-    height: u32,
-    tick_spacing: usize,
-    motif_count: usize,
-    bounds: &[MotifBound],
-) -> Pipe {
-    xpos += bounds.first().unwrap().start as u32;
-    let mut segs = Vec::new();
-
-    for (motif_index, group) in &bounds.iter().chunk_by(|bound| bound.motif_index) {
-        let mut tick_index = 0;
-        for bound in group {
-            if tick_index % tick_spacing == 0 {
-                let tick_label = if motif_index < motif_count {
-                    Some(tick_index as u32)
-                } else {
-                    None
-                };
-                segs.push(Seg {
-                    width: 0,
-                    color: Color::Black.to_string(),
-                    shape: Shape::Tick(tick_label),
-                });
-            }
-            segs.push(Seg {
-                width: (bound.end - bound.start) as u32,
-                color: Color::Black.to_string(),
-                shape: Shape::None,
-            });
-            tick_index += 1;
-        }
-        if tick_index % tick_spacing == 0 {
-            let tick_label = if motif_index < motif_count {
-                Some(tick_index as u32)
-            } else {
-                None
-            };
-            segs.push(Seg {
-                width: 0,
-                color: Color::Black.to_string(),
-                shape: Shape::Tick(tick_label),
-            });
-        }
-    }
-
-    let mut culled_segs = Vec::new();
-    for (is_tick, group) in &segs
-        .into_iter()
-        .chunk_by(|seg| matches!(seg.shape, Shape::Tick(_)))
-    {
-        if is_tick {
-            culled_segs.push(group.last().unwrap());
-        } else {
-            culled_segs.extend(group);
-        }
-    }
-
-    Pipe {
-        xpos,
-        ypos,
-        height,
-        segs: culled_segs,
-        bands: Vec::new(),
-        outline: false,
     }
 }
 
@@ -224,25 +153,5 @@ fn get_pipe(
         segs,
         bands,
         outline,
-    }
-}
-
-fn get_tick_spacing(bounds_by_allele: &[&Vec<MotifBound>]) -> usize {
-    let max_motif_count = bounds_by_allele
-        .iter()
-        .map(|bounds| bounds.len())
-        .max()
-        .unwrap_or(1);
-
-    match max_motif_count {
-        0..=20 => 1,
-        21..=100 => 5,
-        101..=200 => 10,
-        201..=500 => 20,
-        501..=1000 => 50,
-        1001..=1500 => 100,
-        1501..=2000 => 200,
-        2001..=3000 => 250,
-        _ => 500,
     }
 }

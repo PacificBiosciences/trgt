@@ -13,16 +13,18 @@ pub fn align_reads(
         .affine(2, 5, 1)
         .build();
 
-    reads
+    let mut ret: Vec<(Align, Betas, i32, usize)> = reads
         .iter()
         .map(|read| {
             let _status = aligner.align_end_to_end(consensus.as_bytes(), read.seq.as_bytes());
             let wfa_align = aligner.get_alignment();
             let align = convert(consensus_align, &wfa_align);
             let betas = project_betas(&wfa_align, &read.betas);
-            (align, betas)
+            (align, betas, wfa_align.score, read.seq.len())
         })
-        .collect()
+        .collect();
+    ret.sort_by_key(|r| (r.3, std::cmp::Reverse(r.2)));
+    ret.iter().map(|r| (r.0.clone(), r.1.clone())).collect()
 }
 
 /// Convert a WFA alignment into an internal alignment
