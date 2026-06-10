@@ -4,7 +4,7 @@ use std::{
     env, fmt,
     path::{Path, PathBuf},
     str::FromStr,
-    sync::{Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
 };
 use url::Url;
 
@@ -71,6 +71,45 @@ impl fmt::Debug for Remote {
 pub enum InputSource {
     Local(PathBuf),
     Remote(Remote),
+}
+
+#[derive(Clone, Debug)]
+pub struct BamSources {
+    sources: Vec<InputSource>,
+    labels: Vec<Arc<str>>,
+}
+
+impl BamSources {
+    pub fn new(primary: InputSource, supplemental: Option<InputSource>) -> Self {
+        let sources = {
+            let mut sources = Vec::with_capacity(1 + usize::from(supplemental.is_some()));
+            sources.push(primary);
+            if let Some(supplemental) = supplemental {
+                sources.push(supplemental);
+            }
+            sources
+        };
+        let labels = sources
+            .iter()
+            .map(|source| Arc::<str>::from(source.to_string()))
+            .collect();
+
+        Self { sources, labels }
+    }
+
+    pub fn primary(&self) -> &InputSource {
+        self.sources
+            .first()
+            .expect("BAM sources always contain a primary source")
+    }
+
+    pub fn as_slice(&self) -> &[InputSource] {
+        &self.sources
+    }
+
+    pub fn iter_labeled(&self) -> impl Iterator<Item = (&InputSource, Arc<str>)> + '_ {
+        self.sources.iter().zip(self.labels.iter().cloned())
+    }
 }
 
 impl FromStr for InputSource {
@@ -391,6 +430,24 @@ mod tests {
         assert_eq!(redacted, "https://example.com/sample.bam");
         assert!(!redacted.contains("user"));
         assert!(!redacted.contains('@'));
+    }
+
+    #[test]
+    fn bam_sources_preserve_primary_and_supplemental_order() {
+        let primary = InputSource::Local(PathBuf::from("/inputs/hifi.bam"));
+        let supplemental = InputSource::Local(PathBuf::from("/inputs/fail.bam"));
+
+        let sources = BamSources::new(primary.clone(), Some(supplemental.clone()));
+
+        assert_eq!(sources.as_slice().len(), 2);
+        assert_eq!(sources.primary().to_string(), primary.to_string());
+        assert_eq!(sources.as_slice()[1].to_string(), supplemental.to_string());
+
+        let labels = sources
+            .iter_labeled()
+            .map(|(_, label)| label.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(labels, vec![primary.to_string(), supplemental.to_string()]);
     }
 
     #[test]

@@ -28,13 +28,13 @@ authentication tips.
 For cloud storage and remote file access, additional environment variables are
 available. See [remote file support](remote_files.md) for more details.
 
-
 ## Genotype command-line
 
 Options:
 
 - `-g, --genome <GENOME>` Path to the FASTA file containing reference genome. This must be the same reference genome as the one used for read alignment
-- `-r, --reads <READS>` BAM file with alignments of HiFi reads
+- `-r, --reads <READS>` BAM file with aligned HiFi reads
+- `--fail-reads <FAIL_READS>` Optional BAM file with fail reads; disables the default `rq` filter unless `--min-read-quality` is set
 - `-b, --repeats <REPEATS>` BED file with reference coordinates and structure of tandem repeats
 - `-o, --output-prefix <OUTPUT_PREFIX>` Prefix for output files. TRGT generates an unsorted VCF file (`<OUTPUT_PREFIX>.vcf.gz`) and unsorted BAM file with pieces of HiFi reads overlapping the repeats (`<OUTPUT_PREFIX>.spanning.bam`)
 - `-k, --karyotype <KARYOTYPE>` Sample karyotype (XX, XY, or a file path) [default: XX]
@@ -61,6 +61,7 @@ Preset-dependent defaults:
     - `--aln-scoring`: default becomes `1,0,1` (was `2,5,1`)
     - `--min-flank-id-frac`: default becomes `0.8` (was `0.7`)
     - `--min-read-quality`: default becomes `-1.0` (was `0.98`)
+- `--fail-reads` also changes `--min-read-quality` to `-1.0` unless `--min-read-quality` is specified explicitly.
 
 ## Plot command-line
 

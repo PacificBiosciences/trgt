@@ -40,6 +40,7 @@ impl BamWriter {
         let mut writer = bam::Writer::from_path(output_bam_path, &header, bam::Format::Bam)
             .map_err(|e| e.to_string())?;
         writer.set_threads(n_compression_threads).unwrap();
+        log::debug!("Creating BAM writer");
         Ok(BamWriter { writer, flank_len })
     }
 

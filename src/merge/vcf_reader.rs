@@ -1,4 +1,5 @@
 use crate::{merge::tpool::HtsThreadPool, utils::Result};
+use clap::ValueEnum;
 use rust_htslib::{
     bcf::{self, header::HeaderView, Header, HeaderRecord, Read},
     bgzf,
@@ -8,17 +9,36 @@ use std::{
     collections::{HashMap, HashSet},
     ffi::OsString,
     fs::File,
-    io::{BufRead, BufReader, Read as ReadIo},
+    io::Read as ReadIo,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 pub const MIN_VERSION_WITH_PADDING_BASE: u64 = 1;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub enum VcfReadMode {
     Indexed,
     Streaming,
+}
+
+impl From<bool> for VcfReadMode {
+    fn from(value: bool) -> Self {
+        if value {
+            VcfReadMode::Streaming
+        } else {
+            VcfReadMode::Indexed
+        }
+    }
+}
+
+impl std::fmt::Display for VcfReadMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VcfReadMode::Indexed => write!(f, "indexed"),
+            VcfReadMode::Streaming => write!(f, "streaming"),
+        }
+    }
 }
 
 enum ReaderBackend {
@@ -54,43 +74,69 @@ fn is_indexed_local(file: &Path) -> bool {
     add_extension(file, "csi").exists() || add_extension(file, "tbi").exists()
 }
 
-pub fn validate_bgzip_vcf(file: &Path) -> Result<()> {
-    let mut f =
-        File::open(file).map_err(|e| format!("Failed to open file {}: {}", file.display(), e))?;
-    let mut buffer = [0u8; 2];
-    f.read_exact(&mut buffer)
-        .map_err(|e| format!("Failed to read from {}: {}", file.display(), e))?;
+fn has_gzip_magic(path: &Path) -> Result<bool> {
+    let mut f = File::open(path).map_err(|e| format!("Failed to open {}: {e}", path.display()))?;
+    let mut m = [0u8; 2];
+    let n = f
+        .read(&mut m)
+        .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
+    Ok(n == 2 && m == [0x1f, 0x8b])
+}
 
-    const GZIP_MAGIC_NUMBER: [u8; 2] = [0x1f, 0x8b];
-    if buffer != GZIP_MAGIC_NUMBER {
+fn looks_like_bcf(p: &[u8]) -> bool {
+    p.len() >= 5 && &p[..3] == b"BCF" && p[3] == 0x02
+}
+
+fn looks_like_vcf(p: &[u8]) -> bool {
+    let mut p = p;
+    // Strip the UTF-8 BOM if present
+    if p.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        p = &p[3..];
+    }
+    if p.starts_with(b"##fileformat=VCF") {
+        return true;
+    }
+    false
+}
+
+pub fn validate_bgzip_vcf(file: &Path) -> Result<()> {
+    let is_bgzf = rust_htslib::bgzf::is_bgzip(file).map_err(|e| {
+        format!(
+            "Failed to determine whether {} is BGZF-compressed: {e}",
+            file.display()
+        )
+    })?;
+
+    if !is_bgzf {
+        if has_gzip_magic(file)? {
+            return Err(format!("File {} is gzip-compressed but not BGZF (bgzip). Recompress with bgzip (or `bcftools view -Oz`) and index with `tabix -p vcf` / `bcftools index` as needed.", file.display()));
+        }
         return Err(format!(
-            "File {} does not appear to be gzip/bgzip compressed",
+            "File {} is not BGZF (bgzip) compressed",
             file.display()
         ));
     }
 
-    let mut bgzf_reader = BufReader::new(
-        bgzf::Reader::from_path(file)
-            .map_err(|e| format!("Failed to open bgzip reader for {}: {}", file.display(), e))?,
-    );
-    let mut first_line: String = String::new();
-    match bgzf_reader.read_line(&mut first_line) {
-        Ok(0) => Err(format!("File {} is empty", file.display())),
-        Ok(_) => {
-            if !first_line.starts_with("##fileformat=VCFv") {
-                Err(format!(
-                    "File {} is not a valid VCF file (missing '##fileformat' header)",
-                    file.display()
-                ))
-            } else {
-                Ok(())
-            }
-        }
-        Err(e) => Err(format!(
-            "Failed to decompress and read from {}: {}. The file may be corrupted.",
-            file.display(),
-            e
-        )),
+    let mut r = bgzf::Reader::from_path(file)
+        .map_err(|e| format!("Failed to open BGZF reader for {}: {e}", file.display()))?;
+    let mut buf = vec![0u8; 512];
+
+    let n = r
+        .read(&mut buf)
+        .map_err(|e| format!("Failed to read BGZF stream from {}: {e}", file.display()))?;
+    buf.truncate(n);
+
+    if buf.is_empty() {
+        return Err(format!("File {} is empty", file.display()));
+    }
+
+    if looks_like_vcf(&buf) || looks_like_bcf(&buf) {
+        Ok(())
+    } else {
+        Err(format!(
+            "File {} is BGZF-compressed, but the decompressed header does not look like VCF or BCF",
+            file.display()
+        ))
     }
 }
 

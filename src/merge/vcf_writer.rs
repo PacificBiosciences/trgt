@@ -1,44 +1,7 @@
 use super::tpool::HtsThreadPool;
-use crate::utils::Result;
+use crate::utils::{OutputType, Result};
 use rust_htslib::bcf;
 use std::{path::PathBuf, sync::Arc};
-
-#[derive(Debug, Clone)]
-pub enum OutputType {
-    Vcf {
-        is_uncompressed: bool,
-        level: Option<u8>,
-    },
-    Bcf {
-        is_uncompressed: bool,
-        level: Option<u8>,
-    },
-}
-
-impl std::fmt::Display for OutputType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            OutputType::Vcf {
-                is_uncompressed, ..
-            } => {
-                if *is_uncompressed {
-                    write!(f, "uncompressed VCF")
-                } else {
-                    write!(f, "compressed VCF")
-                }
-            }
-            OutputType::Bcf {
-                is_uncompressed, ..
-            } => {
-                if *is_uncompressed {
-                    write!(f, "uncompressed BCF")
-                } else {
-                    write!(f, "compressed BCF")
-                }
-            }
-        }
-    }
-}
 
 pub struct VcfWriter {
     // writer must drop BEFORE _thread_pool to ensure pool is alive during flush
@@ -56,26 +19,16 @@ impl VcfWriter {
         output: Option<&PathBuf>,
         thread_pool: Option<Arc<HtsThreadPool>>,
     ) -> Result<Self> {
-        let resolved_output_type = match (output_type, output) {
-            (Some(output_type), _) => output_type.clone(),
-            (None, Some(path)) => Self::infer_output_type_from_extension(path.to_str().unwrap())?,
-            (None, None) => OutputType::Vcf {
+        let output_type = output_type
+            .cloned()
+            .or_else(|| output.map(|path| OutputType::infer_from_path(path)))
+            .unwrap_or(OutputType::Vcf {
                 is_uncompressed: true,
                 level: None,
-            },
-        };
+            });
+        log::debug!("Creating {} writer", output_type);
 
-        let (is_uncompressed, format) = match &resolved_output_type {
-            OutputType::Vcf {
-                is_uncompressed, ..
-            } => (*is_uncompressed, bcf::Format::Vcf),
-            OutputType::Bcf {
-                is_uncompressed, ..
-            } => (*is_uncompressed, bcf::Format::Bcf),
-        };
-
-        log::debug!("Creating {} writer", resolved_output_type);
-
+        let (is_uncompressed, format) = output_type.writer_options();
         let mut writer = match output {
             Some(path) => bcf::Writer::from_path(path, header, is_uncompressed, format),
             None => bcf::Writer::from_stdout(header, is_uncompressed, format),
@@ -99,7 +52,7 @@ impl VcfWriter {
             writer,
             _thread_pool: thread_pool,
             dummy_record,
-            output_type: resolved_output_type,
+            output_type,
             output_path,
         })
     }
@@ -120,32 +73,6 @@ impl VcfWriter {
 
     pub fn clear_dummy_record(&mut self) {
         self.dummy_record.clear();
-    }
-
-    fn infer_output_type_from_extension(path: &str) -> Result<OutputType> {
-        let path_lower = path.to_lowercase();
-        match path_lower.as_str() {
-            s if s.ends_with(".bcf.gz") => Ok(OutputType::Bcf {
-                is_uncompressed: false,
-                level: None,
-            }),
-            s if s.ends_with(".vcf.gz") || s.ends_with(".vcf.bgz") => Ok(OutputType::Vcf {
-                is_uncompressed: false,
-                level: None,
-            }),
-            s if s.ends_with(".bcf") => Ok(OutputType::Bcf {
-                is_uncompressed: true,
-                level: None,
-            }),
-            s if s.ends_with(".vcf") => Ok(OutputType::Vcf {
-                is_uncompressed: true,
-                level: None,
-            }),
-            _ => Ok(OutputType::Vcf {
-                is_uncompressed: true,
-                level: None,
-            }),
-        }
     }
 
     fn into_parts(self) -> (bcf::Writer, OutputType, Option<PathBuf>) {

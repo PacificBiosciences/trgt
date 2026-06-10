@@ -74,7 +74,7 @@ paths are accepted as long as they exist when the merge runs.
 
 - `--threads N` sets the shared thread pool for decompressing inputs and
   compressing outputs (defaults to 2). Depending on the underlying disk device used
-  this can significantly improve merging speed, especially when reading or writing 
+  this can significantly improve merging speed, especially when reading or writing
   compressed VCF/BCF.
 - `--no-index` streams VCFs without `.tbi`/`.csi` files. Only use this when all
   inputs have identical contig order and are already position-sorted, otherwise
@@ -86,5 +86,5 @@ paths are accepted as long as they exist when the merge runs.
 - If an error is reported with "Reference alleles do not match", it indicates that
   the input VCFs used different TR catalogs for genotyping.
 - High memory use: try `--no-index` to avoid loading `.tbi`/`.csi` into RAM, and
-  consider hierarchical merging instead of a single monolithic run. For example: merge `a` + `b` 
+  consider hierarchical merging instead of a single monolithic run. For example: merge `a` + `b`
   -> `ab`, merge `c` + `d` -> `cd`, then merge `ab` + `cd` -> `abcd`.

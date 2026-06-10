@@ -1891,7 +1891,7 @@
   },
   {
     "name": "trgt",
-    "version": "5.0.0",
+    "version": "5.1.0",
     "authors": "Egor Dolzhenko <edolzhenko@pacificbiosciences.com>, Guilherme De Sena Brandine <gbrandine@pacificbiosciences.com>, Tom Mokveld <tmokveld@pacificbiosciences.com>",
     "repository": null,
     "license": null,

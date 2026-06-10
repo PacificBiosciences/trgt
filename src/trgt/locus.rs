@@ -121,7 +121,7 @@ pub fn stream_locus_groups_into_channel(
     flank_len: usize,
     genotyper: Genotyper,
     karyotype: &Karyotype,
-    sender: Sender<Result<LocusGroup>>,
+    locus_group_tx: Sender<Result<LocusGroup>>,
     max_group_span: u32,
     max_group_size: usize,
 ) -> Result<()> {
@@ -139,8 +139,12 @@ pub fn stream_locus_groups_into_channel(
             Ok(0) => false, // EOF
             Ok(_) => true,
             Err(e) => {
-                let error = format!("Error reading BED line {}: {}", line_number + 1, e);
-                sender.send(Err(error)).map_err(|e| e.to_string())?;
+                if !send_locus_group_result(
+                    &locus_group_tx,
+                    Err(format!("Error reading BED line {}: {}", line_number + 1, e)),
+                ) {
+                    return Ok(());
+                }
                 false
             }
         }
@@ -159,29 +163,47 @@ pub fn stream_locus_groups_into_channel(
         let locus = match locus_result {
             Ok(locus) => locus,
             Err(e) => {
-                let error = format!("Error at BED line {}: {}", line_number, e);
-                sender.send(Err(error)).map_err(|e| e.to_string())?;
+                if !send_locus_group_result(
+                    &locus_group_tx,
+                    Err(format!("Error at BED line {}: {}", line_number, e)),
+                ) {
+                    return Ok(());
+                }
                 continue;
             }
         };
 
         if let Some(group) = &mut current_group {
-            if group.loci.len() < max_group_size && group.can_add_locus(&locus, max_group_span) {
+            if group.len() < max_group_size && group.can_add_locus(&locus, max_group_span) {
                 group.add_locus_unchecked(locus);
                 continue;
             }
-            sender
-                .send(Ok(current_group.take().unwrap()))
-                .map_err(|e| e.to_string())?;
+            if !send_locus_group_result(&locus_group_tx, Ok(current_group.take().unwrap())) {
+                return Ok(());
+            }
         }
         current_group = Some(LocusGroup::new(locus));
     }
 
     if let Some(group) = current_group.take() {
-        sender.send(Ok(group)).map_err(|e| e.to_string())?;
+        send_locus_group_result(&locus_group_tx, Ok(group));
     }
 
     Ok(())
+}
+
+#[inline]
+fn send_locus_group_result(
+    sender: &Sender<Result<LocusGroup>>,
+    result: Result<LocusGroup>,
+) -> bool {
+    match sender.send(result) {
+        Ok(()) => true,
+        Err(_) => {
+            log::error!("Stopped locus grouping because downstream receiver disconnected.");
+            false
+        }
+    }
 }
 
 pub fn get_tr_and_flanks(
@@ -278,4 +300,19 @@ pub fn check_region_bounds(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_fields_accepts_unrecognized_catalog_info_fields() {
+        let fields = decode_fields("ID=TR1;GENE=HTT;MOTIFS=CAG;SOURCE=custom;STRUC=<TR>").unwrap();
+        assert_eq!(get_field(&fields, "ID").unwrap(), "TR1");
+        assert_eq!(get_field(&fields, "MOTIFS").unwrap(), "CAG");
+        assert_eq!(get_field(&fields, "STRUC").unwrap(), "<TR>");
+        assert_eq!(fields.get("GENE"), Some(&"HTT"));
+        assert_eq!(fields.get("SOURCE"), Some(&"custom"));
+    }
 }

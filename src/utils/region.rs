@@ -1,4 +1,5 @@
 use crate::utils::Result;
+use std::fmt;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct GenomicRegion {
@@ -58,6 +59,16 @@ impl GenomicRegion {
     pub fn intersect_position(&self, position: u32) -> bool {
         position >= self.start && position <= self.end
     }
+
+    pub fn as_parts(&self) -> (&str, u32, u32) {
+        (self.contig.as_str(), self.start, self.end)
+    }
+}
+
+impl fmt::Display for GenomicRegion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}-{}", self.contig, self.start, self.end)
+    }
 }
 
 #[cfg(test)]
@@ -69,6 +80,20 @@ mod tests {
         assert_eq!(region.contig, "chr1");
         assert_eq!(region.start, 100);
         assert_eq!(region.end, 200);
+    }
+
+    #[test]
+    fn display_formats_as_region_label() {
+        let region = GenomicRegion::new("chr1", 50, 200).unwrap();
+
+        assert_eq!(region.to_string(), "chr1:50-200");
+    }
+
+    #[test]
+    fn exposes_region_parts() {
+        let region = GenomicRegion::new("chr1", 50, 200).unwrap();
+
+        assert_eq!(region.as_parts(), ("chr1", 50, 200));
     }
 
     #[test]
