@@ -1,5 +1,19 @@
-use rust_htslib::bcf::{header::Header, record::GenotypeAllele, Format, Writer};
-use tempfile::NamedTempFile;
+use rust_htslib::{
+    bam::{
+        self,
+        header::HeaderRecord as BamHeaderRecord,
+        record::{Aux, Cigar, CigarString},
+        Record as BamRecord, Writer as BamWriter,
+    },
+    bcf::{header::Header, record::GenotypeAllele, Format, Writer},
+};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+use tempfile::{NamedTempFile, TempDir};
+
+use super::InputSource;
 
 #[derive(Default)]
 pub struct TestVcfBuilder {
@@ -32,6 +46,133 @@ enum FormatValue {
     String(Vec<Vec<u8>>),
     Integer(Vec<i32>),
     Float(Vec<f32>),
+}
+
+pub struct TestBam {
+    _dir: TempDir,
+    path: PathBuf,
+}
+
+impl TestBam {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn source(&self) -> InputSource {
+        InputSource::Local(self.path.clone())
+    }
+}
+
+pub fn create_indexed_bam(records: &[(&str, &str, i64)]) -> NamedTempFile {
+    create_indexed_bam_from_records(
+        records
+            .iter()
+            .map(|(name, contig, pos)| ((*name).to_owned(), (*contig).to_owned(), *pos)),
+    )
+}
+
+pub fn create_indexed_bam_from_records<I>(records: I) -> NamedTempFile
+where
+    I: IntoIterator<Item = (String, String, i64)>,
+{
+    let bam_file = tempfile::Builder::new()
+        .suffix(".bam")
+        .tempfile()
+        .expect("failed to create temporary BAM path");
+
+    let mut header = bam::Header::new();
+    for contig in ["chr1", "chr2"] {
+        let mut sq = BamHeaderRecord::new(b"SQ");
+        sq.push_tag(b"SN", contig);
+        sq.push_tag(b"LN", 1_000);
+        header.push_record(&sq);
+    }
+
+    {
+        let mut writer = BamWriter::from_path(bam_file.path(), &header, bam::Format::Bam)
+            .expect("failed to create temporary BAM");
+        for (name, contig, pos) in records {
+            writer
+                .write(&mapped_bam_record(&name, test_bam_contig_tid(&contig), pos))
+                .expect("failed to write temporary BAM record");
+        }
+    }
+
+    bam::index::build(bam_file.path(), None, bam::index::Type::Bai, 1)
+        .expect("failed to index temporary BAM");
+
+    bam_file
+}
+
+pub fn create_indexed_test_bam(name: &str, contigs: &[(&str, u32)], samples: &[&str]) -> TestBam {
+    let bam = create_test_bam(name, contigs, samples);
+    bam::index::build(bam.path(), None, bam::index::Type::Bai, 1)
+        .expect("failed to index temporary BAM");
+    bam
+}
+
+pub fn create_unindexed_test_bam(name: &str, contigs: &[(&str, u32)], samples: &[&str]) -> TestBam {
+    create_test_bam(name, contigs, samples)
+}
+
+fn create_test_bam(name: &str, contigs: &[(&str, u32)], samples: &[&str]) -> TestBam {
+    let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+    let path = temp_dir.path().join(name);
+    write_test_bam(&path, contigs, samples);
+    TestBam {
+        _dir: temp_dir,
+        path,
+    }
+}
+
+fn write_test_bam(path: &Path, contigs: &[(&str, u32)], samples: &[&str]) {
+    let mut header = bam::Header::new();
+    for &(contig, len) in contigs {
+        let mut sq = BamHeaderRecord::new(b"SQ");
+        sq.push_tag(b"SN", contig);
+        sq.push_tag(b"LN", len);
+        header.push_record(&sq);
+    }
+    for (index, &sample) in samples.iter().enumerate() {
+        let mut rg = BamHeaderRecord::new(b"RG");
+        rg.push_tag(b"ID", format!("rg{index}"));
+        rg.push_tag(b"SM", sample);
+        header.push_record(&rg);
+    }
+
+    let mut writer = BamWriter::from_path(path, &header, bam::Format::Bam)
+        .expect("failed to create temporary BAM");
+    if !contigs.is_empty() {
+        writer
+            .write(&mapped_bam_record("read1", 0, 10))
+            .expect("failed to write temporary BAM record");
+    }
+}
+
+fn test_bam_contig_tid(contig: &str) -> i32 {
+    match contig {
+        "chr1" => 0,
+        "chr2" => 1,
+        _ => panic!("unexpected contig {contig}"),
+    }
+}
+
+fn mapped_bam_record(name: &str, tid: i32, pos: i64) -> BamRecord {
+    let bases = b"ACGTACGT";
+    let quals = vec![40; bases.len()];
+    let mut record = BamRecord::new();
+    record.set(
+        name.as_bytes(),
+        Some(&CigarString(vec![Cigar::Match(bases.len() as u32)])),
+        bases,
+        &quals,
+    );
+    record.set_tid(tid);
+    record.set_pos(pos);
+    record.set_mapq(60);
+    record.unset_unmapped();
+    record.push_aux(b"rq", Aux::Float(0.99)).unwrap();
+    record
 }
 
 impl TestVcfRecord {
@@ -115,6 +256,24 @@ impl TestVcfRecord {
             .info_integer("END", &[end])
             .info_string("MOTIFS", motifs)
             .info_string("STRUC", struc)
+    }
+
+    pub fn with_trgt_format_values(self) -> Self {
+        self.genotype(&[GenotypeAllele::Unphased(0), GenotypeAllele::Unphased(1)])
+            .format_integer("AL", &[1, 2])
+            .format_string("ALLR", &["1-1,1-2"])
+            .format_integer("SD", &[5, 6])
+            .format_string("MC", &["1,2"])
+            .format_string("MS", &["0-1,0-2"])
+            .format_float("AP", &[0.9, 0.8])
+            .format_float("AM", &[0.1, 0.2])
+    }
+
+    pub fn default_trgt<S: AsRef<[u8]>>(trid: S, pos: i64, end: i32) -> Self {
+        Self::with_trgt_info(trid.as_ref(), end, b"A".as_ref(), b"(A)n".as_ref())
+            .pos(pos)
+            .alleles(&["A", "AA"])
+            .with_trgt_format_values()
     }
 }
 
@@ -264,6 +423,22 @@ impl TestVcfBuilder {
             .add_info("MOTIFS", "1", "String", "Motifs")
             .add_info("STRUC", "1", "String", "Structure")
     }
+
+    pub fn with_trgt_format_defaults(self) -> Self {
+        self.add_format("AL", ".", "Integer", "Allele length")
+            .add_format("ALLR", ".", "String", "Allele range")
+            .add_format("SD", ".", "Integer", "Spanning depth")
+            .add_format("MC", ".", "String", "Motif counts")
+            .add_format("MS", ".", "String", "Motif spans")
+            .add_format("AP", ".", "Float", "Allele purity")
+            .add_format("AM", ".", "Float", "Allele methylation")
+    }
+
+    pub fn with_trgt_merge_defaults(self) -> Self {
+        self.header_line("trgtVersion=1.0.0")
+            .with_trgt_defaults()
+            .with_trgt_format_defaults()
+    }
 }
 
 pub fn write_vcf_with_gt(
@@ -284,9 +459,40 @@ pub fn write_vcf_with_gt(
         .build()
 }
 
+pub fn write_trgt_vcf(
+    path: &Path,
+    sample: &str,
+    trid: &str,
+    pos: i64,
+) -> std::result::Result<(), String> {
+    write_trgt_vcf_with_records(
+        vec![TestVcfRecord::default_trgt(trid, pos, (pos + 5) as i32)],
+        path,
+        sample,
+    )
+}
+
+pub fn write_trgt_vcf_with_records(
+    records: Vec<TestVcfRecord>,
+    path: &Path,
+    sample: &str,
+) -> std::result::Result<(), String> {
+    let builder = TestVcfBuilder::new()
+        .with_trgt_merge_defaults()
+        .contig("chr1", 10000)
+        .sample(sample);
+    let source = records
+        .into_iter()
+        .fold(builder, TestVcfBuilder::record)
+        .build();
+    fs::copy(source.path(), path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_htslib::bam::Read as BamRead;
     use rust_htslib::bcf::Read;
 
     #[test]
@@ -303,6 +509,71 @@ mod tests {
             .build();
 
         assert!(temp_vcf.path().exists());
+    }
+
+    #[test]
+    fn test_indexed_bam_builder_writes_fetchable_records() {
+        let temp_bam = create_indexed_bam(&[
+            ("before-region", "chr1", 10),
+            ("in-region", "chr1", 100),
+            ("other-contig", "chr2", 100),
+        ]);
+
+        let mut reader = rust_htslib::bam::IndexedReader::from_path(temp_bam.path()).unwrap();
+        reader.fetch(("chr1", 50, 150)).unwrap();
+
+        let mut record = rust_htslib::bam::Record::new();
+        let result = reader.read(&mut record).unwrap();
+
+        assert!(result.is_ok());
+        assert_eq!(std::str::from_utf8(record.qname()).unwrap(), "in-region");
+        assert!(reader.read(&mut record).is_none());
+    }
+
+    #[test]
+    fn test_indexed_test_bam_builder_writes_sample_metadata() {
+        let temp_bam = create_indexed_test_bam("sampled.bam", &[("chr1", 1000)], &["sample-a"]);
+        let source = temp_bam.source();
+        let header = crate::utils::get_bam_header(&source).unwrap();
+
+        assert_eq!(
+            crate::utils::get_sample_name(&source, &header).unwrap(),
+            "sample-a"
+        );
+
+        let mut reader = rust_htslib::bam::IndexedReader::from_path(temp_bam.path()).unwrap();
+        reader.fetch(("chr1", 0, 100)).unwrap();
+
+        let mut record = rust_htslib::bam::Record::new();
+        let result = reader.read(&mut record).unwrap();
+
+        assert!(result.is_ok());
+        assert_eq!(std::str::from_utf8(record.qname()).unwrap(), "read1");
+    }
+
+    #[test]
+    fn test_trgt_vcf_helpers_write_default_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("trgt.vcf.gz");
+
+        write_trgt_vcf_with_records(
+            vec![TestVcfRecord::default_trgt("repeat1", 1000, 1050)],
+            &path,
+            "S1",
+        )
+        .unwrap();
+
+        let mut reader = rust_htslib::bcf::Reader::from_path(path).unwrap();
+        assert_eq!(reader.header().sample_count(), 1);
+
+        let mut record = reader.empty_record();
+        let _ = reader.read(&mut record).unwrap();
+
+        let trid = record.info(b"TRID").string().unwrap().unwrap();
+        assert_eq!(trid[0], b"repeat1");
+
+        let allr = record.format(b"ALLR").string().unwrap();
+        assert_eq!(allr[0], b"1-1,1-2");
     }
 
     #[test]

@@ -1,11 +1,12 @@
 use crate::trgt::{
+    genotype_reader::BamRead,
     locus::Locus,
     reads::{get_rq_tag, HiFiRead},
     workflows::Params,
 };
 use crate::utils::{GenomicRegion, Result};
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use rust_htslib::bam::{self, Read, Record};
+use rust_htslib::bam::Record;
 use std::sync::{Arc, Once};
 
 static UNSORTED_WARNING: Once = Once::new();
@@ -13,7 +14,7 @@ static UNSORTED_WARNING: Once = Once::new();
 /// A group of loci that are spatially close on the same contig.
 #[derive(Debug)]
 pub struct LocusGroup {
-    pub loci: Vec<Locus>,
+    loci: Vec<Locus>,
     pub region: GenomicRegion,
 }
 
@@ -62,7 +63,7 @@ impl LocusGroup {
 
     #[inline(always)]
     pub fn first_locus(&self) -> &Locus {
-        &self.loci[0]
+        self.loci.first().expect("non-empty group")
     }
 
     #[inline(always)]
@@ -75,16 +76,25 @@ impl LocusGroup {
         self.loci.len()
     }
 
-    /// Returns `false` because a `LocusGroup` is guaranteed
-    /// to contain at least one locus.
+    /// Checks whether the group contains no loci.
     #[inline]
     pub fn is_empty(&self) -> bool {
-        false
+        self.loci.is_empty()
     }
 }
 
-pub fn extract_reads_for_group(
-    bam: &mut bam::IndexedReader,
+#[inline]
+fn locus_search_start(locus: &Locus, flank_len: u32) -> u32 {
+    locus.region.start.saturating_sub(flank_len)
+}
+
+#[inline]
+fn locus_search_end(locus: &Locus, flank_len: u32) -> u32 {
+    locus.region.end.saturating_add(flank_len)
+}
+
+pub fn extract_reads_for_group<R: BamRead>(
+    reader: &mut R,
     mut group: LocusGroup,
     params: &Arc<Params>,
 ) -> Result<Vec<Locus>> {
@@ -99,7 +109,7 @@ pub fn extract_reads_for_group(
         group_region.end.saturating_add(flank_len),
     );
 
-    if let Err(msg) = bam.fetch(extraction_region) {
+    if let Err(msg) = reader.fetch(extraction_region) {
         return Err(format!(
             "BAM fetch error for group on {}: {}",
             group_region.contig, msg
@@ -110,7 +120,7 @@ pub fn extract_reads_for_group(
     let mut n_reads_per_locus = vec![0; group.loci.len()];
     let mut locus_idx = 0;
     let mut record = Record::new();
-    while let Some(result) = bam.read(&mut record) {
+    while let Some(result) = reader.read(&mut record) {
         match result {
             Ok(_) => {
                 if record.is_supplementary() || record.is_secondary() || record.is_unmapped() {
@@ -125,15 +135,15 @@ pub fn extract_reads_for_group(
 
                 // Find the first locus that could possibly overlap with the current read. Since both reads and loci are sorted by position, the locus pointer can be advanced
                 while locus_idx < group.loci.len()
-                    && group.loci[locus_idx].region.end + flank_len < read_start
+                    && locus_search_end(&group.loci[locus_idx], flank_len) < read_start
                 {
                     locus_idx += 1;
                 }
 
                 let mut hifi_read_opt = None;
                 for (i, locus) in group.loci.iter_mut().enumerate().skip(locus_idx) {
-                    let locus_search_start = locus.region.start.saturating_sub(flank_len);
-                    let locus_search_end = locus.region.end + flank_len;
+                    let locus_search_start = locus_search_start(locus, flank_len);
+                    let locus_search_end = locus_search_end(locus, flank_len);
                     // The loci are sorted, if the locus start is past the read end, no subsequent loci can overlap
                     if locus_search_start > read_end {
                         break;
@@ -345,5 +355,23 @@ mod tests {
 
         assert!(group.can_add_locus(&locus2, 300));
         assert!(!group.can_add_locus(&locus2, 299));
+    }
+
+    #[test]
+    fn test_is_empty_reflects_loci_storage() {
+        let locus = create_test_locus("test1", "chr1", 100, 200);
+        let mut group = LocusGroup::new(locus);
+
+        group.loci.clear();
+
+        assert!(group.is_empty());
+    }
+
+    #[test]
+    fn test_locus_search_window_saturates_at_coordinate_bounds() {
+        let locus = create_test_locus("test1", "chr1", 3, u32::MAX - 1);
+
+        assert_eq!(locus_search_start(&locus, 10), 0);
+        assert_eq!(locus_search_end(&locus, 10), u32::MAX);
     }
 }

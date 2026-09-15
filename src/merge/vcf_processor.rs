@@ -117,11 +117,7 @@ pub struct VcfProcessor {
 
 impl VcfProcessor {
     pub fn new(args: &MergeArgs, vcfs: Vec<PathBuf>) -> Result<Self> {
-        let read_mode = if args.no_index {
-            VcfReadMode::Streaming
-        } else {
-            VcfReadMode::Indexed
-        };
+        let read_mode = args.no_index;
 
         let thread_pool = if args.threads > 1 {
             log::debug!("Building shared thread pool with {} threads", args.threads);
@@ -453,6 +449,7 @@ impl VcfProcessor {
     }
 
     pub fn merge_variants(&mut self) -> Result<()> {
+        log::debug!("Merging variants in {} mode", self.read_mode);
         match self.read_mode {
             VcfReadMode::Indexed => self.merge_variants_indexed(),
             VcfReadMode::Streaming => self.merge_variants_streaming(),
@@ -1302,10 +1299,11 @@ impl InfoFieldValue {
 mod tests {
     use super::*;
     use crate::merge::field_registry::{FieldDataRegistry, FieldNumber};
-    use crate::utils::test_util::{TestVcfBuilder, TestVcfRecord};
+    use crate::utils::test_util::{
+        write_trgt_vcf, write_trgt_vcf_with_records, TestVcfBuilder, TestVcfRecord,
+    };
     use rust_htslib::bcf::{index, Read, Reader};
     use std::collections::BinaryHeap;
-    use std::fs;
     use std::path::Path;
     use tempfile::{tempdir, NamedTempFile};
 
@@ -1353,17 +1351,8 @@ mod tests {
     fn record_missing_required_info_field() -> Record {
         let temp_file = TestVcfBuilder::new()
             .contig("chr1", 1)
-            .add_info("TRID", "1", "String", "Test")
-            .add_info("END", "1", "Integer", "Test")
-            .add_info("MOTIFS", "1", "String", "Test")
-            .add_info("STRUC", "1", "String", "Test")
-            .add_format("AL", ".", "Integer", "Allele length")
-            .add_format("ALLR", ".", "String", "Allele range")
-            .add_format("SD", ".", "Integer", "Spanning reads")
-            .add_format("MC", ".", "String", "Motif counts")
-            .add_format("MS", ".", "String", "Motif spans")
-            .add_format("AP", ".", "Float", "Allele purity")
-            .add_format("AM", ".", "Float", "Methylation")
+            .with_trgt_defaults()
+            .with_trgt_format_defaults()
             .sample("Sample1")
             .record(
                 TestVcfRecord::new()
@@ -1393,17 +1382,8 @@ mod tests {
     fn create_mock_processor() -> VcfProcessor {
         let header = TestVcfBuilder::new()
             .contig("chr1", 1)
-            .add_info("TRID", "1", "String", "Test TRID")
-            .add_info("END", "1", "Integer", "Test END")
-            .add_info("MOTIFS", "1", "String", "Test MOTIFS")
-            .add_info("STRUC", "1", "String", "Test STRUC")
-            .add_format("AL", ".", "Integer", "Allele length")
-            .add_format("ALLR", ".", "String", "Allele range")
-            .add_format("SD", ".", "Integer", "Spanning depth")
-            .add_format("MC", ".", "String", "Motif counts")
-            .add_format("MS", ".", "String", "Motif spans")
-            .add_format("AP", ".", "Float", "Allele purity")
-            .add_format("AM", ".", "Float", "Allele methylation")
+            .with_trgt_defaults()
+            .with_trgt_format_defaults()
             .sample("Sample1")
             .sample("Sample2")
             .build_header();
@@ -1458,41 +1438,6 @@ mod tests {
         }
     }
 
-    fn build_trgt_vcf(path: &Path, sample: &str, trid: &str, pos: i64) -> Result<()> {
-        let source = TestVcfBuilder::new()
-            .header_line("trgtVersion=1.0.0")
-            .contig("chr1", 1000)
-            .add_info("TRID", "1", "String", "TR ID")
-            .add_info("END", "1", "Integer", "End position")
-            .add_info("MOTIFS", "1", "String", "Motifs")
-            .add_info("STRUC", "1", "String", "Structure")
-            .add_format("AL", ".", "Integer", "Allele length")
-            .add_format("ALLR", ".", "String", "Allele range")
-            .add_format("SD", ".", "Integer", "Spanning depth")
-            .add_format("MC", ".", "String", "Motif counts")
-            .add_format("MS", ".", "String", "Motif spans")
-            .add_format("AP", ".", "Float", "Allele purity")
-            .add_format("AM", ".", "Float", "Allele methylation")
-            .sample(sample)
-            .record(
-                TestVcfRecord::with_trgt_info(trid.as_bytes(), (pos + 5) as i32, b"A", b"(A)n")
-                    .pos(pos)
-                    .alleles(&["A", "AA"])
-                    .genotype(&[GenotypeAllele::Unphased(0), GenotypeAllele::Unphased(1)])
-                    .format_integer("AL", &[1, 2])
-                    .format_string("ALLR", &["1-1", "1-2"])
-                    .format_integer("SD", &[5, 6])
-                    .format_string("MC", &["1", "2"])
-                    .format_string("MS", &["0-1", "0-2"])
-                    .format_float("AP", &[0.9, 0.8])
-                    .format_float("AM", &[0.1, 0.2]),
-            )
-            .build_with_compression(true);
-
-        fs::copy(source.path(), path).map_err(|e| e.to_string())?;
-        Ok(())
-    }
-
     fn merge_args_for_test(vcfs: Vec<PathBuf>, output: PathBuf, no_index: bool) -> MergeArgs {
         MergeArgs {
             vcfs: Some(vcfs),
@@ -1508,38 +1453,9 @@ mod tests {
             quit_on_error: true,
             contigs: None,
             threads: 1,
-            no_index,
+            no_index: no_index.into(),
             write_index: false,
         }
-    }
-
-    fn build_trgt_vcf_with_records(
-        records: Vec<TestVcfRecord>,
-        path: &Path,
-        sample: &str,
-    ) -> Result<()> {
-        let builder = TestVcfBuilder::new()
-            .header_line("trgtVersion=1.0.0")
-            .contig("chr1", 10000)
-            .add_info("TRID", "1", "String", "TR ID")
-            .add_info("END", "1", "Integer", "End position")
-            .add_info("MOTIFS", "1", "String", "Motifs")
-            .add_info("STRUC", "1", "String", "Structure")
-            .add_format("AL", ".", "Integer", "Allele length")
-            .add_format("ALLR", ".", "String", "Allele range")
-            .add_format("SD", ".", "Integer", "Spanning depth")
-            .add_format("MC", ".", "String", "Motif counts")
-            .add_format("MS", ".", "String", "Motif spans")
-            .add_format("AP", ".", "Float", "Allele purity")
-            .add_format("AM", ".", "Float", "Allele methylation")
-            .sample(sample);
-
-        let source = records
-            .into_iter()
-            .fold(builder, |b, rec| b.record(rec))
-            .build();
-        fs::copy(source.path(), path).map_err(|e| e.to_string())?;
-        Ok(())
     }
 
     fn summarize_vcf(path: &Path) -> Result<(usize, Vec<RecordSummary>)> {
@@ -1661,8 +1577,8 @@ mod tests {
         let vcf_a = dir.path().join("a.vcf.gz");
         let vcf_b = dir.path().join("b.vcf.gz");
 
-        build_trgt_vcf(&vcf_a, "S1", "repeat1", 10)?;
-        build_trgt_vcf(&vcf_b, "S2", "repeat1", 10)?;
+        write_trgt_vcf(&vcf_a, "S1", "repeat1", 10)?;
+        write_trgt_vcf(&vcf_b, "S2", "repeat1", 10)?;
 
         index::build(&vcf_a, None::<&PathBuf>, 1, index::Type::Tbx).map_err(|e| e.msg)?;
         index::build(&vcf_b, None::<&PathBuf>, 1, index::Type::Tbx).map_err(|e| e.msg)?;
@@ -1698,30 +1614,10 @@ mod tests {
         let dir = tempdir().unwrap();
         let vcf_path = dir.path().join("dupe.vcf");
 
-        build_trgt_vcf_with_records(
+        write_trgt_vcf_with_records(
             vec![
-                TestVcfRecord::with_trgt_info("repeatX", 1050, "T", "(T)n")
-                    .pos(1000)
-                    .alleles(&["A", "AT"])
-                    .genotype(&[GenotypeAllele::Unphased(0), GenotypeAllele::Unphased(1)])
-                    .format_integer("AL", &[1, 2])
-                    .format_string("ALLR", &["1-1", "1-2"])
-                    .format_integer("SD", &[5, 6])
-                    .format_string("MC", &["1", "2"])
-                    .format_string("MS", &["0-1", "0-2"])
-                    .format_float("AP", &[0.9, 0.8])
-                    .format_float("AM", &[0.1, 0.2]),
-                TestVcfRecord::with_trgt_info("repeatX", 1050, "T", "(T)n")
-                    .pos(1000)
-                    .alleles(&["A", "AT"])
-                    .genotype(&[GenotypeAllele::Unphased(0), GenotypeAllele::Unphased(1)])
-                    .format_integer("AL", &[1, 2])
-                    .format_string("ALLR", &["1-1", "1-2"])
-                    .format_integer("SD", &[5, 6])
-                    .format_string("MC", &["1", "2"])
-                    .format_string("MS", &["0-1", "0-2"])
-                    .format_float("AP", &[0.9, 0.8])
-                    .format_float("AM", &[0.1, 0.2]),
+                TestVcfRecord::default_trgt("repeatX", 1000, 1050),
+                TestVcfRecord::default_trgt("repeatX", 1000, 1050),
             ],
             &vcf_path,
             "S1",
@@ -1751,47 +1647,17 @@ mod tests {
         let vcf_a = dir.path().join("a_multi.vcf.gz");
         let vcf_b = dir.path().join("b_multi.vcf.gz");
 
-        build_trgt_vcf_with_records(
+        write_trgt_vcf_with_records(
             vec![
-                TestVcfRecord::with_trgt_info("repeatA", 1050, "T", "(T)n")
-                    .pos(1000)
-                    .alleles(&["A", "AT"])
-                    .genotype(&[GenotypeAllele::Unphased(0), GenotypeAllele::Unphased(1)])
-                    .format_integer("AL", &[1, 2])
-                    .format_string("ALLR", &["1-1", "1-2"])
-                    .format_integer("SD", &[5, 6])
-                    .format_string("MC", &["1", "2"])
-                    .format_string("MS", &["0-1", "0-2"])
-                    .format_float("AP", &[0.9, 0.8])
-                    .format_float("AM", &[0.1, 0.2]),
-                TestVcfRecord::with_trgt_info("repeatB", 1050, "T", "(T)n")
-                    .pos(1000)
-                    .alleles(&["A", "AT"])
-                    .genotype(&[GenotypeAllele::Unphased(0), GenotypeAllele::Unphased(1)])
-                    .format_integer("AL", &[1, 2])
-                    .format_string("ALLR", &["1-1", "1-2"])
-                    .format_integer("SD", &[5, 6])
-                    .format_string("MC", &["1", "2"])
-                    .format_string("MS", &["0-1", "0-2"])
-                    .format_float("AP", &[0.9, 0.8])
-                    .format_float("AM", &[0.1, 0.2]),
+                TestVcfRecord::default_trgt("repeatA", 1000, 1050),
+                TestVcfRecord::default_trgt("repeatB", 1000, 1050),
             ],
             &vcf_a,
             "S1",
         )?;
 
-        build_trgt_vcf_with_records(
-            vec![TestVcfRecord::with_trgt_info("repeatB", 1050, "T", "(T)n")
-                .pos(1000)
-                .alleles(&["A", "AT"])
-                .genotype(&[GenotypeAllele::Unphased(0), GenotypeAllele::Unphased(1)])
-                .format_integer("AL", &[1, 2])
-                .format_string("ALLR", &["1-1", "1-2"])
-                .format_integer("SD", &[5, 6])
-                .format_string("MC", &["1", "2"])
-                .format_string("MS", &["0-1", "0-2"])
-                .format_float("AP", &[0.9, 0.8])
-                .format_float("AM", &[0.1, 0.2])],
+        write_trgt_vcf_with_records(
+            vec![TestVcfRecord::default_trgt("repeatB", 1000, 1050)],
             &vcf_b,
             "S2",
         )?;
@@ -1830,49 +1696,14 @@ mod tests {
         let dir = tempdir().unwrap();
         let vcf_path = dir.path().join("unsorted.vcf");
 
-        let source = TestVcfBuilder::new()
-            .contig("chr1", 10000)
-            .header_line("trgtVersion=1.0.0")
-            .add_info("TRID", "1", "String", "TR ID")
-            .add_info("END", "1", "Integer", "End position")
-            .add_info("MOTIFS", "1", "String", "Motifs")
-            .add_info("STRUC", "1", "String", "Structure")
-            .add_format("AL", ".", "Integer", "Allele length")
-            .add_format("ALLR", ".", "String", "Allele range")
-            .add_format("SD", ".", "Integer", "Spanning depth")
-            .add_format("MC", ".", "String", "Motif counts")
-            .add_format("MS", ".", "String", "Motif spans")
-            .add_format("AP", ".", "Float", "Allele purity")
-            .add_format("AM", ".", "Float", "Allele methylation")
-            .sample("S1")
-            .record(
-                TestVcfRecord::with_trgt_info("repeat1", 1050, "T", "(T)n")
-                    .pos(1000)
-                    .alleles(&["A", "AT"])
-                    .genotype(&[GenotypeAllele::Unphased(0), GenotypeAllele::Unphased(1)])
-                    .format_integer("AL", &[1, 2])
-                    .format_string("ALLR", &["1-1", "1-2"])
-                    .format_integer("SD", &[5, 6])
-                    .format_string("MC", &["1", "2"])
-                    .format_string("MS", &["0-1", "0-2"])
-                    .format_float("AP", &[0.9, 0.8])
-                    .format_float("AM", &[0.1, 0.2]),
-            )
-            .record(
-                TestVcfRecord::with_trgt_info("repeat1", 550, "T", "(T)n")
-                    .pos(500)
-                    .alleles(&["A", "AT"])
-                    .genotype(&[GenotypeAllele::Unphased(0), GenotypeAllele::Unphased(1)])
-                    .format_integer("AL", &[1, 2])
-                    .format_string("ALLR", &["1-1", "1-2"])
-                    .format_integer("SD", &[5, 6])
-                    .format_string("MC", &["1", "2"])
-                    .format_string("MS", &["0-1", "0-2"])
-                    .format_float("AP", &[0.9, 0.8])
-                    .format_float("AM", &[0.1, 0.2]),
-            )
-            .build();
-        fs::copy(source.path(), &vcf_path).map_err(|e| e.to_string())?;
+        write_trgt_vcf_with_records(
+            vec![
+                TestVcfRecord::default_trgt("repeat1", 1000, 1050),
+                TestVcfRecord::default_trgt("repeat1", 500, 550),
+            ],
+            &vcf_path,
+            "S1",
+        )?;
 
         let output = dir.path().join("out.vcf");
         let mut args = merge_args_for_test(vec![vcf_path.clone()], output, true);
@@ -1962,10 +1793,7 @@ mod tests {
         // Record without TRID (first), followed by two records with TRID
         let temp_file = TestVcfBuilder::new()
             .contig("chr1", 10000)
-            .add_info("TRID", "1", "String", "Test")
-            .add_info("END", "1", "Integer", "Test")
-            .add_info("MOTIFS", "1", "String", "Test")
-            .add_info("STRUC", "1", "String", "Test")
+            .with_trgt_defaults()
             .record(
                 TestVcfRecord::new()
                     .pos(999)

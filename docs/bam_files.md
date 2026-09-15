@@ -7,6 +7,9 @@ with flanking sequence (50 bp by default, configurable using
 inspection (for example, in IGV) and for downstream analyses such as `trgt plot`
 or `trgt deepdive`.
 
+When `trgt genotype` is run with both `--reads` and `--fail-reads` input BAM files, the spanning
+BAM may contain records originating from either BAM file.
+
 **Note**: As TRGT is under active development, the BAM formatting may be subject
 to changes in future versions.
 

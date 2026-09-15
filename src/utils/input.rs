@@ -72,11 +72,11 @@ where
 }
 
 pub fn get_reads(
-    reads_source: &InputSource,
+    reads_src: &InputSource,
     locus: &InputLocus,
     max_allele_reads: Option<usize>,
 ) -> Result<Vec<Read>> {
-    let mut bam = open_bam_reader(reads_source, 1)?;
+    let mut bam = open_bam_reader(reads_src, 1)?;
 
     // This assumes that TRGT outputs flanks shorter than 1Kbps in length. We may want
     // to implement a more flexible mechanism for handling flank lengths here and elsewhere.

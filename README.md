@@ -62,7 +62,7 @@ reads overlapping the repeats.
 
 ## Version information
 
-Current version: **5.0.0**.
+Current version: **5.1.0**.
 
 For a complete changelog, see the [changelog](CHANGELOG.md) or the git history.
 

@@ -1,5 +1,5 @@
 use crate::utils::{Ploidy, Result};
-use std::{collections::HashMap, fs, io::BufRead};
+use std::{collections::HashMap, fs, io::BufRead, path::Path};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Karyotype {
@@ -19,8 +19,17 @@ impl Karyotype {
             "XX" => PloidyInfo::PresetXX,
             "XY" => PloidyInfo::PresetXY,
             _ => {
-                let file =
-                    fs::File::open(encoding).map_err(|e| format!("File {}: {}", encoding, e))?;
+                let path = Path::new(encoding);
+                if !path.exists() {
+                    if is_path_like(encoding) {
+                        return Err(format!("Karyotype file does not exist: {encoding}"));
+                    }
+                    return Err(format!(
+                        "Invalid karyotype: {encoding}. Expected XX, XY, or a path to an existing karyotype file"
+                    ));
+                }
+                let file = fs::File::open(path)
+                    .map_err(|e| format!("Karyotype file {}: {}", path.display(), e))?;
                 let reader = std::io::BufReader::new(file);
                 return Self::from_reader(reader);
             }
@@ -43,25 +52,38 @@ impl Karyotype {
                 line.map_err(|e| format!("Error reading line {}: {}", line_number + 1, e))?;
 
             let mut parts = line.split_whitespace();
-            let chrom = parts.next().ok_or(
-                format!("Missing chromosome/ploidy at line {}", line_number + 1).to_string(),
-            )?;
-            let ploidy_str = parts.next().ok_or(
-                format!("Missing chromosome/ploidy at line {}", line_number + 1).to_string(),
-            )?;
+            let chrom = parts.next().ok_or(format!(
+                "Missing chromosome/ploidy at line {}: {:?}",
+                line_number + 1,
+                line
+            ))?;
+            let ploidy_str = parts.next().ok_or(format!(
+                "Missing chromosome/ploidy at line {}: {:?}",
+                line_number + 1,
+                line
+            ))?;
             let ploidy = ploidy_str.parse::<Ploidy>().map_err(|e: String| {
-                format!("Invalid ploidy at line {}, {}", line_number + 1, e)
+                format!(
+                    "Invalid ploidy at line {}: {:?}, {}",
+                    line_number + 1,
+                    line,
+                    e
+                )
             })?;
 
             if ploidies.contains_key(chrom) {
                 Err(format!(
-                    "Duplicate chromosome entry at line {}: {}",
+                    "Duplicate chromosome entry at line {}: {:?}",
                     line_number + 1,
-                    chrom
+                    line
                 ))?
             } else {
                 ploidies.insert(chrom.to_string(), ploidy);
             }
+        }
+
+        if ploidies.is_empty() {
+            return Err("Karyotype file contains no chromosome ploidy entries".to_string());
         }
 
         Ok(Self {
@@ -91,6 +113,13 @@ impl Karyotype {
             }
         }
     }
+}
+
+fn is_path_like(encoding: &str) -> bool {
+    encoding.contains(std::path::MAIN_SEPARATOR)
+        || encoding.starts_with('.')
+        || encoding.starts_with('~')
+        || Path::new(encoding).extension().is_some()
 }
 
 #[cfg(test)]
@@ -132,8 +161,8 @@ chr1 2\n\
 chr2\n\
 chrX 1\n";
         let reader = std::io::Cursor::new(data);
-        let result = Karyotype::from_reader(reader);
-        assert!(result.is_err());
+        let error = Karyotype::from_reader(reader).unwrap_err();
+        assert_eq!(error, "Missing chromosome/ploidy at line 2: \"chr2\"");
     }
 
     #[test]
@@ -143,17 +172,46 @@ chr1 2\n\
 chr2 3\n\
 chrX 1\n";
         let reader = std::io::Cursor::new(data);
-        let result = Karyotype::from_reader(reader);
-        assert!(result.is_err());
+        let error = Karyotype::from_reader(reader).unwrap_err();
+        assert_eq!(
+            error,
+            "Invalid ploidy at line 2: \"chr2 3\", must be set to 0, 1, or 2"
+        );
+    }
+
+    #[test]
+    fn test_karyotype_from_reader_duplicate_chromosome() {
+        let data = "\
+chr1 2\n\
+chr1 1\n";
+        let reader = std::io::Cursor::new(data);
+        let error = Karyotype::from_reader(reader).unwrap_err();
+        assert_eq!(error, "Duplicate chromosome entry at line 2: \"chr1 1\"");
     }
 
     #[test]
     fn test_karyotype_from_reader_empty_file() {
         let data = "";
         let reader = std::io::Cursor::new(data);
-        let result = Karyotype::from_reader(reader);
-        assert!(result.is_ok());
-        let karyotype = result.unwrap();
-        assert!(karyotype.get_ploidy("chr1").is_err());
+        let error = Karyotype::from_reader(reader).unwrap_err();
+        assert_eq!(
+            error,
+            "Karyotype file contains no chromosome ploidy entries"
+        );
+    }
+
+    #[test]
+    fn test_karyotype_new_rejects_unknown_preset() {
+        let error = Karyotype::new("XXY").unwrap_err();
+        assert_eq!(
+            error,
+            "Invalid karyotype: XXY. Expected XX, XY, or a path to an existing karyotype file"
+        );
+    }
+
+    #[test]
+    fn test_karyotype_new_reports_missing_path_like_file() {
+        let error = Karyotype::new("./missing.karyotype").unwrap_err();
+        assert_eq!(error, "Karyotype file does not exist: ./missing.karyotype");
     }
 }

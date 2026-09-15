@@ -1,16 +1,19 @@
 //! Defines the `VcfWriter` struct and associated functions for creating and writing results to a VCF file.
 
-use crate::trgt::{
-    locus::Locus,
-    workflows::{Genotype, LocusResult},
-};
 use crate::utils::Result;
+use crate::{
+    trgt::{
+        locus::Locus,
+        workflows::{Genotype, LocusResult},
+    },
+    utils::OutputType,
+};
 use rust_htslib::{
     bam,
     bcf::{
         self,
         record::{GenotypeAllele, Numeric},
-        Format, Record,
+        Record,
     },
 };
 use std::{env, io::Write};
@@ -59,41 +62,53 @@ impl VcfWriter {
         output_path: &str,
         sample_name: &str,
         bam_header: &bam::Header,
+        output_type: Option<OutputType>,
     ) -> Result<VcfWriter> {
+        let vcf_header = Self::create_header(sample_name, bam_header);
+
+        let output_type = output_type.unwrap_or_default();
+        log::debug!("Creating {output_type} writer");
+        let (is_uncompressed, format) = output_type.writer_options();
+        let writer = bcf::Writer::from_path(output_path, &vcf_header, is_uncompressed, format)
+            .map_err(|_| format!("Invalid VCF output path: {output_path}"))?;
+
+        let record = writer.empty_record();
+
+        Ok(VcfWriter { writer, record })
+    }
+
+    fn create_header(sample_name: &str, bam_header: &bam::Header) -> bcf::header::Header {
         let mut vcf_header = bcf::header::Header::new();
 
-        for line in VCF_LINES.iter() {
+        for line in VCF_LINES {
             vcf_header.push_record(line.as_bytes());
         }
 
         if let Some(records) = bam_header.to_hashmap().get("SQ") {
             for record in records {
-                let contig_line =
-                    format!(r#"##contig=<ID={},length={}>"#, record["SN"], record["LN"]);
+                let contig_line = {
+                    let name = &record["SN"];
+                    let length = &record["LN"];
+                    format!(r#"##contig=<ID={name},length={length}>"#)
+                };
                 vcf_header.push_record(contig_line.as_bytes());
             }
         }
 
-        let line = format!(
-            "##{}Version={}",
-            env!("CARGO_PKG_NAME"),
-            crate::cli::FULL_VERSION
-        );
-        vcf_header.push_record(line.as_bytes());
+        let package_name = env!("CARGO_PKG_NAME");
+        let full_version = crate::cli::FULL_VERSION;
+        let version_line = format!("##{package_name}Version={full_version}");
+        vcf_header.push_record(version_line.as_bytes());
 
-        let args: Vec<String> = env::args().collect();
-        let command_line = args.join(" ");
-        let line = format!("##{}Command={}", env!("CARGO_PKG_NAME"), command_line);
-        vcf_header.push_record(line.as_bytes());
+        let command_line = {
+            let args: Vec<String> = env::args().collect();
+            args.join(" ")
+        };
+        let command_line = format!("##{package_name}Command={command_line}");
+        vcf_header.push_record(command_line.as_bytes());
 
         vcf_header.push_sample(sample_name.as_bytes());
-
-        let writer = bcf::Writer::from_path(output_path, &vcf_header, false, Format::Vcf)
-            .map_err(|_| format!("Invalid VCF output path: {}", output_path))?;
-
-        let record = writer.empty_record();
-
-        Ok(VcfWriter { writer, record })
+        vcf_header
     }
 
     /// Writes a VCF record for a given locus and its genotyping results.
@@ -489,7 +504,7 @@ mod tests {
         bam_header.push_record(&sq);
 
         let mut writer =
-            VcfWriter::new(tmp.path().to_str().unwrap(), "sample", &bam_header).unwrap();
+            VcfWriter::new(tmp.path().to_str().unwrap(), "sample", &bam_header, None).unwrap();
 
         let locus = Locus::test_base();
         let mut genotype = Genotype::new();

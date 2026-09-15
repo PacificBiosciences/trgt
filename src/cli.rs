@@ -1,10 +1,12 @@
 use crate::{
-    merge::vcf_writer::OutputType,
+    merge::vcf_reader::VcfReadMode,
     preflight_fields,
-    utils::{Genotyper, InputSource, Result, TrgtPreset, TrgtScoring},
+    utils::{
+        BamSources, Genotyper, InputSource, Karyotype, OutputType, Result, TrgtPreset, TrgtScoring,
+    },
 };
 use chrono::Datelike;
-use clap::{ArgAction, ArgGroup, Parser, Subcommand, ValueEnum};
+use clap::{builder::ArgPredicate, ArgAction, ArgGroup, Parser, Subcommand, ValueEnum};
 use log::{Level, LevelFilter};
 use owo_colors::{
     colors::{Blue, Green, Magenta, Red, Yellow},
@@ -86,14 +88,24 @@ pub struct GenotypeArgs {
     pub genome_src: InputSource,
 
     /// BAM file with aligned HiFi reads
-    #[arg(short = 'r', long = "reads", value_name = "READS", required = true)]
+    #[arg(
+        short = 'r',
+        long = "reads",
+        value_name = "READS",
+        required = true,
+        num_args = 1
+    )]
     pub reads_src: InputSource,
+
+    /// Optional BAM file with fail reads, also disables the default rq filter unless explicitly set with --min-read-quality
+    #[arg(long = "fail-reads", value_name = "FAIL_READS", num_args = 1)]
+    pub fail_reads_src: Option<InputSource>,
 
     /// BED file with repeat coordinates
     #[arg(short = 'b', long = "repeats", value_name = "REPEATS", required = true)]
     pub repeats_src: InputSource,
 
-    /// Prefix for output files (.vcf.gz and .spanning.bam)
+    /// Prefix for output files (.vcf/.bcf/.vcf.gz/.bcf.gz and .spanning.bam)
     #[arg(
         short = 'o',
         long = "output-prefix",
@@ -108,9 +120,10 @@ pub struct GenotypeArgs {
         short = 'k',
         long = "karyotype",
         value_name = "KARYOTYPE",
-        default_value = "XX"
+        default_value = "XX",
+        value_parser = Karyotype::new
     )]
-    pub karyotype: String,
+    pub karyotype: Karyotype,
 
     /// Number of threads
     #[arg(
@@ -204,6 +217,7 @@ pub struct GenotypeArgs {
         value_name = "MIN_RQ",
         default_value = "0.98",
         default_value_if("preset", "targeted", Some("-1.0")),
+        default_value_if("fail_reads_src", ArgPredicate::IsPresent, Some("-1.0")),
         help_heading = "Advanced",
         hide = true
     )]
@@ -222,6 +236,16 @@ pub struct GenotypeArgs {
         help_heading = "Advanced"
     )]
     pub max_depth: usize,
+
+    /// Output type: u|b|v|z, u/b: un/compressed BCF, v/z: un/compressed VCF
+    #[arg(
+        short = 'O',
+        long = "output-type",
+        value_name = "OUTPUT_TYPE",
+        value_parser = validate_output_type,
+        help_heading = "Advanced IO"
+    )]
+    pub output_type: Option<OutputType>,
 
     /// Maximum span of a locus group in base pairs. Loci separated by more than this distance will be in different groups
     #[arg(
@@ -308,8 +332,12 @@ pub struct GenotypeArgs {
 }
 
 impl GenotypeArgs {
+    pub fn read_sources(&self) -> BamSources {
+        BamSources::new(self.reads_src.clone(), self.fail_reads_src.clone())
+    }
+
     pub fn preflight(&self) -> Result<()> {
-        preflight_fields!(self, genome_src, reads_src, repeats_src)
+        preflight_fields!(self, genome_src, reads_src, fail_reads_src, repeats_src)
     }
 }
 
@@ -452,7 +480,7 @@ pub struct MergeArgs {
         short = 'O',
         long = "output-type",
         value_name = "OUTPUT_TYPE",
-        value_parser = merge_validate_output_type,
+        value_parser = validate_output_type,
         help_heading = "Advanced"
     )]
     pub output_type: Option<OutputType>,
@@ -506,8 +534,17 @@ pub struct MergeArgs {
     pub threads: usize,
 
     /// Stream VCFs without loading their indexes (contig order must match across inputs)
-    #[arg(long = "no-index", help_heading = "Advanced")]
-    pub no_index: bool,
+    #[arg(
+        long = "no-index",
+        help_heading = "Advanced",
+        value_enum,
+        default_value_t = VcfReadMode::Indexed,
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "streaming",
+        value_name = "MODE"
+    )]
+    pub no_index: VcfReadMode,
 
     /// Write index for the output compressed VCF/BCF file
     #[arg(short = 'W', long = "write-index", help_heading = "Advanced")]
@@ -772,7 +809,7 @@ fn scoring_from_string(s: &str) -> Result<TrgtScoring> {
     })
 }
 
-fn merge_validate_output_type(s: &str) -> Result<OutputType> {
+fn validate_output_type(s: &str) -> Result<OutputType> {
     let valid_prefixes = ["u", "b", "v", "z"];
     if valid_prefixes.contains(&s) {
         return match s {

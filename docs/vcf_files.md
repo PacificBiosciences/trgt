@@ -40,8 +40,9 @@ independent of any particular sample. TRGT writes the following keys:
 
 ## Genotype fields (FORMAT)
 
-The final column list per-sample FORMAT names and their comma-separated
-values. TRGT currently emits the keys below (values are given in allele order):
+The final column lists per-sample FORMAT names and their comma-separated
+values. TRGT currently emits the keys below (values are given in TRGT allele
+order unless otherwise noted):
 
 | Genotype field | Description                                                     | Example       |
 |----------------|-----------------------------------------------------------------|---------------|
@@ -53,6 +54,38 @@ values. TRGT currently emits the keys below (values are given in allele order):
 | MS             | Run-length segmentation string per allele                       | 0(0-51)_1(57-84),0(0-72)_1(78-105) |
 | AP             | Allele purity (fraction of motif bases)                         | 0.5,0.9       |
 | AM             | Mean 5mCpG methylation level per allele (`.` when no CpG sites or methylation data unavailable) | 0.4,0.5       |
+| PS             | Phase set identifier, emitted when `GT` is phased               | 15906760      |
+
+### Allele order and phased genotypes
+
+The `GT` field uses standard VCF allele indexes: `0` refers to the reference
+allele, while `1` and above refer to alternate alleles. When `GT` is phased
+with `|`, the allele indexes are shown in haplotype order and may be displayed
+as `1|0` or `2|1`.
+
+Other allele-level FORMAT fields are not reordered to match the phased `GT`
+display order. Fields such as `AL`, `ALLR`, `SD`, `MC`, `MS`, `AP`, and `AM`
+remain in TRGT allele order. For heterozygous records, this is the same order
+the alleles would have in the unphased genotype, such as `0/1` or `1/2`.
+
+For example, if a record has `GT:MC` equal to `1|0:30,31`, the first `MC`
+value (`30`) belongs to allele `0` (the reference allele) and the second value
+(`31`) belongs to allele `1` (the alternate allele). The phased `GT` indicates
+that allele `1` is on the first haplotype and allele `0` is on the second
+haplotype; it does not change the order of `MC`. Similarly, if a record has `GT:MC`
+equal to `2|1:10,20`, the `MC` values correspond to alleles `1` and `2`, respectively,
+not to the left-to-right phased `GT` order.
+
+When using TRGT VCFs downstream, keep the phasing interpretation and the
+allele-level FORMAT interpretation separate. To attach FORMAT values to allele
+indexes for a heterozygous record, strip the phasing separator from `GT`, sort
+the called allele indexes numerically, and zip those indexes with the
+comma-separated FORMAT values. To report values in haplotype order, first build
+that allele-index-to-value mapping, then use the left and right sides of the
+phased `GT` to look up each haplotype's value. For `GT:MC` equal to
+`1|0:30,31`, this gives allele `0 -> 30` and allele `1 -> 31`; in haplotype
+order, haplotype 1 carries allele `1` with `MC=31`, and haplotype 2 carries
+allele `0` with `MC=30`.
 
 ## MC and MS fields
 

@@ -7,7 +7,7 @@ written to the local filesystem.
 ## Files that can be remote
 
 - Reference genomes (`--genome`)
-- Read alignments (`--reads`, `--spanning-reads`)
+- Read alignments (`--reads`, `--fail-reads`, `--spanning-reads`)
 - Repeat catalogs (`--repeats`)
 - VCF files for plotting and deepdive (`--vcf`)
 
