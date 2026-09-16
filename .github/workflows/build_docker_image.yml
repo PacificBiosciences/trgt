@@ -26,10 +26,12 @@ on:
 
 permissions:
   # contents: write is needed by the commit-sha job, which pushes the updated digest file.
-  # actions: read is needed by the guard job's `gh api .../actions/workflows/.../runs` lookup. It is
-  # not optional: naming any permission here sets every unnamed one to none, so without this line that
-  # call returns 403, the `2>/dev/null || true` swallows it, and the walk-back to the last successfully
-  # built commit silently degrades to ${head}^ -- the exact multi-commit-push case it exists to handle.
+  # actions: read covers the guard job's `gh api .../actions/workflows/.../runs` lookup. While this
+  # repo is public that endpoint is readable without it (str-analysis runs the same lookup with
+  # contents: write alone, and its walk-back resolves a real base), but naming any permission here
+  # sets every unnamed one to none, so this line is what keeps the lookup working if the repo is ever
+  # made private. Without a working lookup the walk-back silently degrades to ${head}^, which is the
+  # multi-commit-push case described below.
   contents: write
   actions: read
 
