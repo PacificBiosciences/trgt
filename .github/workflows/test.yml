@@ -1,0 +1,48 @@
+name: unit tests
+
+# Gates build_docker_image.yml: that workflow runs on this one's completion and only publishes an
+# image when this succeeded on a push to main. Deliberately not triggered on tags, for the same
+# reason as in str-analysis: a tag run checks out the workflow file as it existed at the tagged
+# commit, so tagging a historical commit re-runs that commit's CI config against today's runners.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: cargo test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same native dependencies the Dockerfile installs, for the same reasons: htslib needs zlib,
+      # OpenSSL and libcurl headers, WFA2-lib is built through cmake, and both -sys crates run
+      # bindgen, which needs libclang. Keep this list and docker/Dockerfile in sync.
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes \
+            build-essential \
+            cmake \
+            pkg-config \
+            libclang-dev \
+            zlib1g-dev \
+            libssl-dev \
+            libcurl4-openssl-dev
+
+      # Pinned rather than "stable" so a toolchain release cannot turn a green gate red on its own,
+      # and so CI matches the 1.87 builder image in docker/Dockerfile. Bump both together.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.87.0"
+
+      # htslib and WFA2-lib are compiled from source, so a cold build is minutes. This caches the
+      # cargo registry and target/ between runs, keyed on Cargo.lock.
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run tests
+        run: cargo test --locked

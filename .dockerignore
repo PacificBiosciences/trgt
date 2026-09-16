@@ -1,0 +1,24 @@
+# The build context for docker/Dockerfile is the repository root. A clean checkout (what CI builds
+# from) is only ~15 MB, so this file is not about CI. It is about a local `make build`: this repo has
+# no .gitignore, so an active working directory accumulates untracked target/ (GBs) and benchmarks/
+# (tens of GBs) that would otherwise be shipped to the docker daemon on every local build.
+#
+# .git is deliberately NOT excluded: build.rs runs `git describe --always` and the resulting short
+# commit sha becomes part of `trgt --version` (see FULL_VERSION in src/cli.rs). Excluding it would
+# silently downgrade the version string to a bare 5.1.0 with no way to tell which commit built it.
+
+target/
+benchmarks/
+test/
+test2/
+
+.memory/
+.code_review_local/
+.playwright-mcp/
+.prompt/
+.idea/
+.vscode/
+
+*.svg.gz
+CLAUDE_HISTORY_*.md
+PLAN_*.md

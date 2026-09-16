@@ -1,0 +1,184 @@
+name: build docker image
+
+# Builds the TRGT binary from this fork into a docker image and pushes it to Docker Hub, then commits
+# the updated docker/sha256_dockerhub.txt digest back to the repo. Modelled on the build_docker_images
+# workflow in broadinstitute/str-analysis.
+#
+# This workflow does NOT run directly on push. It runs after the "unit tests" workflow completes, and
+# only proceeds when that run (a) succeeded, (b) was triggered by a push to main, and (c) touched
+# files that actually affect the image (checked by the guard job below). That guarantees an image is
+# only published from a commit whose tests passed. It can also be triggered manually
+# (Actions tab -> "build docker image" -> "Run workflow"), which bypasses the test gate.
+#
+# The digest commit uses [skip ci] so it does not re-run the tests and therefore does not re-trigger
+# this workflow.
+#
+# Required repository secrets (add at https://github.com/bw2/trgt/settings/secrets/actions):
+#   DOCKERHUB_USERNAME - Docker Hub account name
+#   DOCKERHUB_TOKEN    - Docker Hub access token with read/write scope
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["unit tests"]
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+jobs:
+  guard:
+    name: gate on tests + changed paths
+    runs-on: ubuntu-latest
+    # Run only for a manual dispatch, or a successful "unit tests" run that was triggered by a push to
+    # main. Test runs from pull requests or failed test runs do not match, so the build is skipped.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Decide whether to build
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # A manual dispatch always builds (no path filtering).
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual trigger: building."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Otherwise build only when image-relevant files changed since the last published image.
+          # The range must cover the WHOLE push, not just its final commit: a push can contain several
+          # commits, and diffing ${head}^..${head} judges all of them by the last one. A push whose tip
+          # commit happens to be unrelated (a README tweak) would then skip the build even though an
+          # earlier commit in the same push changed src/, leaving the published image stale until some
+          # later push happened to end in a relevant commit. So walk back to the commit the last
+          # successful run of this workflow built, and diff from there.
+          head='${{ github.event.workflow_run.head_sha }}'
+          prev=$(gh api --paginate \
+                   "repos/${GITHUB_REPOSITORY}/actions/workflows/build_docker_image.yml/runs?status=success&branch=main&per_page=20" \
+                   --jq '[.workflow_runs[] | select(.id != ${{ github.run_id }}) | .head_sha] | first' 2>/dev/null | head -n 1 || true)
+          if [ -n "${prev:-}" ] && [ "$prev" != "null" ] && git cat-file -e "${prev}^{commit}" 2>/dev/null \
+              && [ "$prev" != "$head" ] && git merge-base --is-ancestor "$prev" "$head" 2>/dev/null; then
+            base="$prev"
+            echo "Base = commit built by the last successful run ($base)."
+          elif git rev-parse "${head}^" >/dev/null 2>&1; then
+            base="${head}^"
+            echo "No usable previous successful run; falling back to $base."
+          else
+            base=$(git rev-list --max-parents=0 "$head" | tail -n 1)
+            echo "No parent commit; falling back to the root commit $base."
+          fi
+
+          echo "Comparing ${base}..${head}"
+          # This workflow's own digest commits touch docker/sha256_dockerhub.txt. Widening the range
+          # above would otherwise match that every time and make the path filter always true.
+          files=$(git diff --name-only "$base" "$head" | grep -Ev '^docker/sha256_[a-z_]+\.txt$' || true)
+          echo "Changed files (excluding the published digest file):"
+          echo "$files"
+          if echo "$files" | grep -Eq '^(src/|crates/|build\.rs|Cargo\.toml|Cargo\.lock|docker/|\.dockerignore|\.github/workflows/build_docker_image\.yml)'; then
+            echo "Image-relevant changes found: building."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No image-relevant changes: skipping build."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: build and push
+    needs: guard
+    if: needs.guard.outputs.run == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push to Docker Hub
+        working-directory: docker
+        run: |
+          set -euo pipefail
+          # Reuse the Dockerfile/tag defined in the Makefile. The image is built from this checkout,
+          # which is the commit whose tests passed, so the image always matches a tested tree.
+          COMMIT="${{ github.event.workflow_run.head_sha || github.sha }}"
+          make build TRGT_COMMIT="$COMMIT"
+          TAG=$(grep -E '^DOCKERHUB_TAG' Makefile | cut -d'=' -f2 | xargs)
+          BASE=${TAG%:latest}
+          docker push "$TAG" | tee push.log
+          grep -E 'latest: digest: sha256:' push.log \
+            | sed -E 's/.*(sha256:[0-9a-f]+).*/\1/' \
+            | sed "s|^|${BASE}@|" > sha256_dockerhub.txt
+          echo "Updated $(pwd)/sha256_dockerhub.txt:"
+          cat sha256_dockerhub.txt
+          # Report the version the published binary actually claims, so the run log ties the image
+          # back to a commit without anyone having to pull it.
+          docker run --rm "$TAG" trgt --version
+
+      - name: Upload sha256 digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: sha256-docker
+          path: docker/sha256_dockerhub.txt
+
+  commit-sha:
+    name: commit sha256 digest
+    needs: build
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download sha256 digest
+        uses: actions/download-artifact@v4
+        with:
+          name: sha256-docker
+          path: artifacts
+
+      - name: Commit and push
+        run: |
+          set -euo pipefail
+          cp artifacts/sha256_dockerhub.txt docker/sha256_dockerhub.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docker/sha256_dockerhub.txt
+          if git diff --cached --quiet; then
+            echo "No sha256 change to commit"
+            exit 0
+          fi
+          git commit -m "Update docker image sha256 digest [skip ci]"
+          # Another commit may land on main during the multi-minute build, making a bare push a
+          # non-fast-forward. Try to push; on failure, rebase onto the latest main -- taking our
+          # freshly-built digest on conflict (-X theirs) -- and retry. Always abort any half-finished
+          # rebase first, so a prior conflict cannot leave unmerged files and wedge later attempts.
+          for attempt in 1 2 3 4 5; do
+            git push && exit 0
+            echo "Push attempt ${attempt} failed; rebasing onto latest main and retrying."
+            git rebase --abort 2>/dev/null || true
+            git fetch origin main
+            git rebase -X theirs origin/main || git rebase --abort 2>/dev/null || true
+            sleep 5
+          done
+          echo "Failed to push sha256 digest after multiple attempts."
+          exit 1
