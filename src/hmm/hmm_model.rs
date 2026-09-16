@@ -51,66 +51,55 @@ impl Hmm {
         self.ems[target_state] = ems.iter().map(|v| v.ln()).collect_vec();
     }
 
-    fn calc_viterbi_score(
-        &self,
-        query: &[u8],
-        scores: &MatF64,
-        state: usize,
-        index: usize,
-    ) -> Option<(usize, f64)> {
-        let symbol = query[index];
-        let is_silent = self.ems[state].iter().all(|e| e.is_infinite());
-        let em_term = if is_silent {
-            0.0
-        } else {
-            self.ems[state][symbol as usize]
-        };
-        let lookback = !is_silent as usize;
-
-        let in_states = &self.in_states[state];
-
-        if index == 0 && !in_states.is_empty() && lookback == 1 {
-            return None;
-        }
-
-        let mut max_score = f64::NEG_INFINITY;
-        let mut best_state = None;
-
-        for (in_state_index, prev_state) in in_states.iter().enumerate() {
-            let prev_score = scores[*prev_state][index - lookback];
-            let trans_lp = self.in_lps[state][in_state_index];
-            let in_state_score = prev_score + trans_lp + em_term;
-
-            if in_state_score > max_score {
-                best_state = Some(prev_state);
-                max_score = in_state_score
-            }
-        }
-
-        //TODO: Investigate "em_term != 0.0"
-        if index == 0 && in_states.is_empty() && em_term.is_finite() {
-            max_score = em_term;
-            best_state = Some(&state);
-        }
-
-        best_state.map(|state| (*state, max_score))
-    }
-
-    fn generate_mats(&self, query: &[u8]) -> (Vec<Vec<f64>>, Vec<Vec<Option<usize>>>) {
+    fn generate_traceback(&self, query: &[u8]) -> Vec<usize> {
         let ordered_states = self.order_states();
-        let mut scores = vec![vec![f64::NEG_INFINITY; query.len()]; self.num_states];
-        let mut states = vec![vec![None; query.len()]; self.num_states];
+        let silent: Vec<bool> = self
+            .ems
+            .iter()
+            .map(|ems| ems.iter().all(|e| e.is_infinite()))
+            .collect();
+        // Emitting states read the previous column; silent states read the current
+        // column in topological order. Earlier score columns are never needed.
+        let mut previous = vec![f64::NEG_INFINITY; self.num_states];
+        let mut current = vec![f64::NEG_INFINITY; self.num_states];
+        // Store predecessors by query position for contiguous writes. MAX marks
+        // unreachable cells without the extra word used by Option<usize>.
+        let mut states = vec![usize::MAX; query.len() * self.num_states];
 
-        for index in 0..query.len() {
-            for state in &ordered_states {
-                let result = self.calc_viterbi_score(query, &scores, *state, index);
-                if let Some((prev_state, score)) = result {
-                    scores[*state][index] = score;
-                    states[*state][index] = Some(prev_state);
+        for (index, &symbol) in query.iter().enumerate() {
+            current.fill(f64::NEG_INFINITY);
+            let column = &mut states[index * self.num_states..(index + 1) * self.num_states];
+            for &state in &ordered_states {
+                let in_states = &self.in_states[state];
+                if index == 0 && !in_states.is_empty() && !silent[state] {
+                    continue;
                 }
+                let em_term = if silent[state] {
+                    0.0
+                } else {
+                    self.ems[state][symbol as usize]
+                };
+                let scores = if silent[state] { &current } else { &previous };
+                let mut max_score = f64::NEG_INFINITY;
+                let mut best_state = usize::MAX;
+                for (in_state_index, &prev_state) in in_states.iter().enumerate() {
+                    // Preserve arithmetic and predecessor order, including ties.
+                    let score = scores[prev_state] + self.in_lps[state][in_state_index] + em_term;
+                    if score > max_score {
+                        best_state = prev_state;
+                        max_score = score;
+                    }
+                }
+                if index == 0 && in_states.is_empty() && em_term.is_finite() {
+                    max_score = em_term;
+                    best_state = state;
+                }
+                current[state] = max_score;
+                column[state] = best_state;
             }
+            std::mem::swap(&mut previous, &mut current);
         }
-        (scores, states)
+        states
     }
 
     /*
@@ -122,7 +111,7 @@ impl Hmm {
         count_by_state
     } */
 
-    fn traceback(&self, query: &[u8], states: &[Vec<Option<usize>>]) -> Vec<usize> {
+    fn traceback(&self, query: &[u8], states: &[usize]) -> Vec<usize> {
         let mut state = self.num_states - 1;
         let exp_max_capacity = self.num_states + (self.num_states as f64 * 0.20).round() as usize;
         let mut traceback_states = Vec::with_capacity(exp_max_capacity);
@@ -130,7 +119,8 @@ impl Hmm {
         while state != 0 {
             traceback_states.push(state);
 
-            let prev_state = states[state][index].unwrap();
+            let prev_state = states[index * self.num_states + state];
+            assert_ne!(prev_state, usize::MAX, "Unreachable traceback state");
             if self.ems[state].iter().any(|e| e.is_finite()) {
                 index -= 1;
             }
@@ -151,7 +141,7 @@ impl Hmm {
             .map(|&b| encode_base(b))
             .collect_vec();
 
-        let (_scores, states) = self.generate_mats(&query);
+        let states = self.generate_traceback(&query);
         self.traceback(&query, &states)
     }
 
@@ -248,6 +238,160 @@ fn encode_base(base: u8) -> u8 {
         b'C' => 3,
         b'G' => 4,
         _ => panic!(),
+    }
+}
+
+#[cfg(test)]
+mod equivalence_tests {
+    use super::*;
+    use crate::hmm::build_hmm;
+    use rand::{Rng, SeedableRng};
+
+    // Independent full-matrix recurrence from the original implementation.
+    fn reference_label(hmm: &Hmm, query: &[u8]) -> Vec<usize> {
+        if query.is_empty() {
+            return Vec::new();
+        }
+        let query: Vec<u8> = b"#"
+            .iter()
+            .chain(query.iter())
+            .chain(b"#".iter())
+            .map(|&b| encode_base(b))
+            .collect();
+        let mut scores = vec![vec![f64::NEG_INFINITY; query.len()]; hmm.num_states];
+        let mut states = vec![vec![None; query.len()]; hmm.num_states];
+        let ordered_states = hmm.order_states();
+        for index in 0..query.len() {
+            for &state in &ordered_states {
+                let silent = hmm.ems[state].iter().all(|e| e.is_infinite());
+                let em_term = if silent {
+                    0.0
+                } else {
+                    hmm.ems[state][query[index] as usize]
+                };
+                let lookback = !silent as usize;
+                let incoming = &hmm.in_states[state];
+                if index == 0 && !incoming.is_empty() && lookback == 1 {
+                    continue;
+                }
+                let mut max_score = f64::NEG_INFINITY;
+                let mut best = None;
+                for (i, &prev) in incoming.iter().enumerate() {
+                    let score = scores[prev][index - lookback] + hmm.in_lps[state][i] + em_term;
+                    if score > max_score {
+                        max_score = score;
+                        best = Some(prev);
+                    }
+                }
+                if index == 0 && incoming.is_empty() && em_term.is_finite() {
+                    max_score = em_term;
+                    best = Some(state);
+                }
+                if best.is_some() {
+                    scores[state][index] = max_score;
+                    states[state][index] = best;
+                }
+            }
+        }
+        let mut path = Vec::new();
+        let mut state = hmm.num_states - 1;
+        let mut index = query.len() - 1;
+        while state != 0 {
+            path.push(state);
+            let prev = states[state][index].unwrap();
+            if hmm.ems[state].iter().any(|e| e.is_finite()) {
+                index -= 1;
+            }
+            state = prev;
+        }
+        path.push(0);
+        path.reverse();
+        path
+    }
+
+    #[test]
+    fn rolling_scores_match_full_matrix_exhaustively() {
+        for motifs in [
+            vec![b"A".to_vec()],
+            vec![b"CAG".to_vec()],
+            vec![b"AC".to_vec(), b"A".to_vec()],
+            vec![b"N".to_vec(), b"AN".to_vec()],
+            vec![b"CAG".to_vec(), b"CAG".to_vec()], // tied paths
+            vec![b"ACGTACGT".to_vec()],             // silent deletion chains
+        ] {
+            let hmm = build_hmm(&motifs);
+            for len in 0..=5 {
+                for mut encoded in 0..4_usize.pow(len) {
+                    let query: Vec<u8> = (0..len)
+                        .map(|_| {
+                            let base = b"ACGT"[encoded % 4];
+                            encoded /= 4;
+                            base
+                        })
+                        .collect();
+                    assert_eq!(
+                        hmm.label(&query),
+                        reference_label(&hmm, &query),
+                        "{motifs:?} {query:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rolling_scores_match_full_matrix_for_long_and_mutated_repeats() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1729);
+        for case in 0..200 {
+            let motifs: Vec<Vec<u8>> = (0..rng.random_range(1..=4))
+                .map(|_| {
+                    (0..rng.random_range(1..=40))
+                        .map(|_| b"ACGTN"[rng.random_range(0..5)])
+                        .collect()
+                })
+                .collect();
+            let mut query = Vec::new();
+            for _ in 0..rng.random_range(1..=20) {
+                for &base in &motifs[rng.random_range(0..motifs.len())] {
+                    if rng.random_range(0..10) == 0 {
+                        continue;
+                    }
+                    query.push(if base == b'N' || rng.random_range(0..10) == 0 {
+                        b"ACGT"[rng.random_range(0..4)]
+                    } else {
+                        base
+                    });
+                    if rng.random_range(0..10) == 0 {
+                        query.push(b"ACGT"[rng.random_range(0..4)]);
+                    }
+                }
+            }
+            let hmm = build_hmm(&motifs);
+            assert_eq!(
+                hmm.label(&query),
+                reference_label(&hmm, &query),
+                "case {case}"
+            );
+        }
+        for len in [1, 6, 100] {
+            let motif: Vec<u8> = (0..len).map(|i| b"ACGT"[i % 4]).collect();
+            let hmm = build_hmm(&[motif.clone()]);
+            let query = motif.repeat(3);
+            assert_eq!(hmm.label(&query), reference_label(&hmm, &query));
+        }
+    }
+
+    // A 1000-base motif builds ~3000 states, where reference_label's full
+    // num_states x query_len matrices dominate the whole suite's runtime. Real
+    // catalog motifs top out at 24 bases, so this stress case runs on demand:
+    // cargo test -- --ignored
+    #[test]
+    #[ignore]
+    fn rolling_scores_match_full_matrix_for_very_long_motif() {
+        let motif: Vec<u8> = (0..1000).map(|i| b"ACGT"[i % 4]).collect();
+        let hmm = build_hmm(&[motif.clone()]);
+        let query = motif.repeat(3);
+        assert_eq!(hmm.label(&query), reference_label(&hmm, &query));
     }
 }
 
