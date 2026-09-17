@@ -7,9 +7,9 @@ use crate::trgt::{
     writers::{BamWriter, VcfWriter},
 };
 use crate::utils::{
-    create_writer,
+    create_writer, get_bam_header, open_genome_reader, output_path,
     readers::{open_genotyper_bam_reader, open_genotyper_bam_reader_with_thread_pool},
-    validate_bam_sources, BamSources, InputSource, Result, TrgtScoring,
+    fnv1a64, validate_bam_sources, BamSources, InputSource, Result, TrgtScoring,
 };
 use crate::wfaligner::{AlignmentScope, Heuristic, MemoryModel, WFAligner};
 use crossbeam_channel::{bounded, Receiver, Sender};
@@ -17,8 +17,8 @@ use rayon::{
     iter::{ParallelBridge, ParallelIterator},
     ThreadPoolBuilder,
 };
-use rust_htslib::tpool::ThreadPool;
-use std::{cell::RefCell, sync::Arc, thread};
+use rust_htslib::{bam, tpool::ThreadPool};
+use std::{cell::RefCell, collections::HashMap, path::Path, sync::Arc, thread};
 
 #[derive(Debug, Clone)]
 struct ThreadContextParams {
@@ -67,6 +67,15 @@ thread_local! {
 }
 
 pub fn trgt(args: GenotypeArgs) -> Result<()> {
+    if args.resume && !args.disable_bam_output {
+        return Err(
+            "--resume requires --disable-bam-output because TRGT cannot resume the \
+             <output-prefix>.spanning.bam output: that file would end up holding the reads of only \
+             the loci genotyped by the last run"
+                .to_string(),
+        );
+    }
+
     let thread_context = ThreadContextParams {
         flank_scoring: args.aln_scoring,
     };
@@ -77,11 +86,34 @@ pub fn trgt(args: GenotypeArgs) -> Result<()> {
         validate_bam_sources(&bam_sources, args.sample_name.as_deref())?;
 
     // TODO: A thread pool for the writers can be shared between the VCF and BAM writers
-    let output_type = args.output_type.unwrap_or_default();
-    let output_suffix = output_type.output_suffix();
-    let mut vcf_writer = create_writer(&args.output_prefix, output_suffix, |path| {
-        VcfWriter::new(path, &sample_name, &bam_header, Some(output_type))
-    })?;
+    let output_type = args.output_type.clone().unwrap_or_default();
+    let vcf_path = output_path(&args.output_prefix, output_type.output_suffix());
+    let vcf_path = vcf_path
+        .to_str()
+        .ok_or_else(|| format!("Output path is not valid UTF-8: {}", vcf_path.display()))?;
+    let params = genotyping_params(&args, &bam_header)?;
+    let (mut vcf_writer, completed_ids) = if args.resume {
+        warn_about_spanning_bam_of_interrupted_run(&args.output_prefix);
+        VcfWriter::resume(
+            vcf_path,
+            &sample_name,
+            &bam_header,
+            Some(output_type),
+            &args.repeats_src,
+            &params,
+        )?
+    } else {
+        (
+            VcfWriter::new(
+                vcf_path,
+                &sample_name,
+                &bam_header,
+                Some(output_type),
+                &params,
+            )?,
+            HashMap::new(),
+        )
+    };
 
     let output_flank_len = std::cmp::min(args.flank_len, args.output_flank_len);
     let bam_writer = if !args.disable_bam_output {
@@ -166,6 +198,7 @@ pub fn trgt(args: GenotypeArgs) -> Result<()> {
                         locus_group_tx,
                         args.max_group_span,
                         args.max_group_size,
+                        completed_ids,
                     )
                     .map_err(|e| format!("Locus grouping stage failed: {e}"))
                 })?
@@ -235,6 +268,85 @@ pub fn trgt(args: GenotypeArgs) -> Result<()> {
 
     log::debug!("Analysis complete. All pipeline threads shut down successfully.");
     Ok(())
+}
+
+/// Returns the genotyping settings of a run, as a single line that two runs can be compared on.
+///
+/// Only what shapes the genotypes belongs here: the settings, and enough of the inputs to tell them
+/// apart from other inputs. A resumed run keeps the records of the run it continues, so all of it
+/// has to be what those records were produced with.
+///
+/// The inputs are stood for by digests rather than by their paths, so that the same reads and the
+/// same reference still compare equal when a run finds them somewhere else, as a run picked up on
+/// another machine does.
+fn genotyping_params(args: &GenotypeArgs, bam_header: &bam::Header) -> Result<String> {
+    let scoring = &args.aln_scoring;
+    Ok([
+        format!("genotyper={}", args.genotyper),
+        format!("karyotype={}", args.karyotype.encoding()),
+        format!("flank-len={}", args.flank_len),
+        format!("min-flank-id-frac={}", args.min_flank_id_frac),
+        format!(
+            "aln-scoring={},{},{}",
+            scoring.mism_scr, scoring.gapo_scr, scoring.gape_scr
+        ),
+        format!("min-read-quality={}", args.min_hifi_read_qual),
+        format!("max-depth={}", args.max_depth),
+        format!("skip-phase-annotation={}", args.skip_phase_annotation),
+        format!("fail-reads={}", args.fail_reads_src.is_some()),
+        format!(
+            "reads={:016x}",
+            reads_digest(bam_header, args.fail_reads_src.as_ref())?
+        ),
+        format!("genome={:016x}", genome_digest(&args.genome_src)?),
+    ]
+    .join(";"))
+}
+
+/// Returns a value standing for the reads of a run: the headers of the files they come from, the
+/// fail reads included.
+///
+/// Two read files that hold different reads under the same header are not told apart by this, since
+/// telling those apart would mean reading both files through.
+fn reads_digest(bam_header: &bam::Header, fail_reads_src: Option<&InputSource>) -> Result<u64> {
+    let mut headers = bam_header.to_bytes();
+    if let Some(fail_reads_src) = fail_reads_src {
+        headers.extend(get_bam_header(fail_reads_src)?.to_bytes());
+    }
+    Ok(fnv1a64(&headers))
+}
+
+/// Returns a value standing for a reference genome: the contigs of its index, in order, with their
+/// lengths.
+///
+/// Two references built of different contigs are told apart by this. Two that hold the same contigs
+/// but different bases, such as a genome and a masked copy of it, are not, since telling those apart
+/// would mean reading both genomes through.
+fn genome_digest(genome_src: &InputSource) -> Result<u64> {
+    let genome_reader = open_genome_reader(genome_src)?;
+    let mut contigs = Vec::new();
+    for index in 0..genome_reader.n_seqs() as i32 {
+        let name = genome_reader.seq_name(index).map_err(|e| e.to_string())?;
+        let length = genome_reader.fetch_seq_len(&name);
+        contigs.push(format!("{name}:{length}"));
+    }
+    Ok(fnv1a64(contigs.join(",").as_bytes()))
+}
+
+/// Warns about the spanning reads an interrupted run left behind.
+///
+/// A resumed run cannot continue that BAM, which is why it has to run with --disable-bam-output, so
+/// the file stays as the interrupted run left it while the VCF beside it grows past it.
+fn warn_about_spanning_bam_of_interrupted_run(output_prefix: &Path) {
+    let bam_path = output_path(output_prefix, "spanning.bam");
+    if bam_path.exists() {
+        log::warn!(
+            "{} holds the spanning reads of the interrupted run only, and a resumed run cannot add \
+             to it. Delete it, or rerun without --resume, if the reads of every locus are needed \
+             (trgt plot needs them)",
+            bam_path.display()
+        );
+    }
 }
 
 fn run_fetcher_thread<R: BamRead>(

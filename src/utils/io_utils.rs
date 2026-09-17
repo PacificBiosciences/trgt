@@ -1,14 +1,19 @@
 use crate::utils::Result;
 use rust_htslib::bcf;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Returns the path of an output file, formed by appending `output_suffix` to `output_prefix`.
+pub fn output_path(output_prefix: &Path, output_suffix: &str) -> PathBuf {
+    let mut path = output_prefix.to_path_buf().into_os_string();
+    path.push(format!(".{output_suffix}"));
+    PathBuf::from(path)
+}
 
 pub fn create_writer<T, F>(output_prefix: &Path, output_suffix: &str, f: F) -> Result<T>
 where
     F: FnOnce(&str) -> Result<T>,
 {
-    let mut output_path = output_prefix.to_path_buf().into_os_string();
-    output_path.push(format!(".{output_suffix}"));
-    f(output_path.to_str().unwrap())
+    f(output_path(output_prefix, output_suffix).to_str().unwrap())
 }
 
 #[derive(Debug, Clone)]

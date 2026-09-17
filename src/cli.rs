@@ -227,6 +227,11 @@ pub struct GenotypeArgs {
     #[arg(long = "disable-bam-output", help_heading = "Advanced IO")]
     pub disable_bam_output: bool,
 
+    /// Resume a previous run by keeping the genotypes already in the output VCF and genotyping only
+    /// the remaining loci (requires --disable-bam-output)
+    #[arg(long = "resume", help_heading = "Advanced IO")]
+    pub resume: bool,
+
     /// Maximum locus depth
     #[arg(
         long = "max-depth",

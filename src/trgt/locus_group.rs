@@ -4,7 +4,7 @@ use crate::trgt::{
     reads::{get_rq_tag, HiFiRead},
     workflows::Params,
 };
-use crate::utils::{GenomicRegion, Result};
+use crate::utils::{fnv1a64, GenomicRegion, Result};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use rust_htslib::bam::Record;
 use std::sync::{Arc, Once};
@@ -93,6 +93,20 @@ fn locus_search_end(locus: &Locus, flank_len: u32) -> u32 {
     locus.region.end.saturating_add(flank_len)
 }
 
+/// Returns the seed that decides which reads a locus holds on to when it has more of them than it
+/// can hold.
+///
+/// It follows the locus itself: where it lies and what it is called. Two runs over the same catalog
+/// therefore hold on to the same reads for it, whether or not they read it alongside its neighbours,
+/// and whichever version of Rust built them.
+fn reservoir_seed(locus: &Locus) -> u64 {
+    let locus_key = format!(
+        "{}:{}-{}:{}",
+        locus.region.contig, locus.region.start, locus.region.end, locus.id
+    );
+    fnv1a64(locus_key.as_bytes())
+}
+
 pub fn extract_reads_for_group<R: BamRead>(
     reader: &mut R,
     mut group: LocusGroup,
@@ -116,7 +130,12 @@ pub fn extract_reads_for_group<R: BamRead>(
         ));
     }
 
-    let mut rng = StdRng::seed_from_u64(42);
+    // One generator per locus, made when that locus first has more reads than it can hold. Seeding
+    // them from the loci themselves rather than once per group keeps the reads a locus holds on to
+    // from depending on which other loci happened to be read alongside it, so a run that resumes
+    // with only the loci it still has to genotype holds on to the same reads as one that was never
+    // interrupted.
+    let mut rngs: Vec<Option<StdRng>> = (0..group.loci.len()).map(|_| None).collect();
     let mut n_reads_per_locus = vec![0; group.loci.len()];
     let mut locus_idx = 0;
     let mut record = Record::new();
@@ -168,6 +187,9 @@ pub fn extract_reads_for_group<R: BamRead>(
                                     locus.reads.push(clipped_read);
                                 }
                             } else {
+                                let rng = rngs[i].get_or_insert_with(|| {
+                                    StdRng::seed_from_u64(reservoir_seed(locus))
+                                });
                                 let j = rng.random_range(0..=current_count);
                                 if j < reservoir_threshold {
                                     if let Some(clipped_read) =
@@ -210,6 +232,7 @@ pub fn extract_reads_for_group<R: BamRead>(
 mod tests {
     use super::*;
     use crate::utils::{Genotyper, Ploidy};
+    use rust_htslib::bam::record::CigarString;
 
     fn create_test_locus(id: &str, contig: &str, start: u32, end: u32) -> Locus {
         Locus {
@@ -373,5 +396,132 @@ mod tests {
 
         assert_eq!(locus_search_start(&locus, 10), 0);
         assert_eq!(locus_search_end(&locus, 10), u32::MAX);
+    }
+
+    #[test]
+    fn reservoir_seed_follows_the_locus_and_nothing_else() {
+        let locus = create_test_locus("TR1", "chr1", 100, 200);
+
+        // The same locus keeps the same seed, whichever loci it is read alongside, which is what
+        // lets a resumed run hold on to the reads an uninterrupted run would have held on to.
+        assert_eq!(reservoir_seed(&locus), reservoir_seed(&locus));
+        assert_eq!(
+            reservoir_seed(&locus),
+            reservoir_seed(&create_test_locus("TR1", "chr1", 100, 200))
+        );
+
+        // Loci that differ in any part of what they are get their own seed.
+        for other in [
+            create_test_locus("TR2", "chr1", 100, 200),
+            create_test_locus("TR1", "chr2", 100, 200),
+            create_test_locus("TR1", "chr1", 101, 200),
+            create_test_locus("TR1", "chr1", 100, 201),
+        ] {
+            assert_ne!(reservoir_seed(&locus), reservoir_seed(&other));
+        }
+    }
+
+    /// A stand-in for a BAM reader that hands back a fixed list of reads.
+    struct ReplayedReads {
+        reads: Vec<Record>,
+        next: usize,
+    }
+
+    impl ReplayedReads {
+        /// Builds reads that all cover the same stretch of a contig.
+        fn covering(count: usize, start: i64, length: usize) -> Self {
+            let bases = vec![b'A'; length];
+            let quals = vec![30u8; length];
+            let cigar = CigarString::try_from(format!("{length}M").as_str()).unwrap();
+            let reads = (0..count)
+                .map(|index| {
+                    let mut record = Record::new();
+                    record.set(
+                        format!("read{index}").as_bytes(),
+                        Some(&cigar),
+                        &bases,
+                        &quals,
+                    );
+                    record.set_tid(0);
+                    record.set_pos(start);
+                    // A fresh record comes marked unmapped, which the read extraction skips.
+                    record.set_flags(0);
+                    record
+                })
+                .collect();
+            Self { reads, next: 0 }
+        }
+    }
+
+    impl BamRead for ReplayedReads {
+        fn fetch(&mut self, _region: (&str, u32, u32)) -> Result<()> {
+            self.next = 0;
+            Ok(())
+        }
+
+        fn read(&mut self, record: &mut Record) -> Option<Result<()>> {
+            let next = self.reads.get(self.next)?;
+            *record = next.clone();
+            self.next += 1;
+            Some(Ok(()))
+        }
+    }
+
+    fn test_params(max_depth: usize) -> Arc<Params> {
+        Arc::new(Params {
+            min_flank_id_frac: 0.7,
+            min_read_qual: -1.0,
+            search_flank_len: 5,
+            max_depth,
+            skip_phase_annotation: true,
+        })
+    }
+
+    /// The reads a deep locus keeps must not depend on which loci it was read alongside, because a
+    /// resumed run reads it alongside only the loci it still has to genotype.
+    #[test]
+    fn a_deep_locus_keeps_the_same_reads_whichever_loci_it_is_read_with() {
+        let params = test_params(1);
+        let read_count = 4 * params.max_depth * 3;
+
+        let mut whole_group = LocusGroup::new(create_test_locus("TR1", "chr1", 100, 120));
+        whole_group.add_locus_unchecked(create_test_locus("TR2", "chr1", 100, 120));
+        let whole_group_loci = extract_reads_for_group(
+            &mut ReplayedReads::covering(read_count, 60, 120),
+            whole_group,
+            &params,
+        )
+        .unwrap();
+        let read_with_its_neighbour = &whole_group_loci
+            .iter()
+            .find(|locus| locus.id == "TR2")
+            .unwrap()
+            .reads;
+
+        // The same locus, read on its own, as a resumed run would read it once its neighbour has
+        // been genotyped already.
+        let on_its_own = extract_reads_for_group(
+            &mut ReplayedReads::covering(read_count, 60, 120),
+            LocusGroup::new(create_test_locus("TR2", "chr1", 100, 120)),
+            &params,
+        )
+        .unwrap();
+        let read_on_its_own = &on_its_own[0].reads;
+
+        assert!(
+            !read_with_its_neighbour.is_empty() && read_with_its_neighbour.len() < read_count,
+            "the test needs a locus that kept some, but not all, of its reads"
+        );
+        assert_eq!(
+            read_with_its_neighbour.len(),
+            read_on_its_own.len(),
+            "a locus kept a different number of reads when read on its own"
+        );
+        let ids_with_neighbour: Vec<&String> = read_with_its_neighbour
+            .iter()
+            .map(|read| &read.id)
+            .collect();
+        let ids_on_its_own: Vec<&String> = read_on_its_own.iter().map(|read| &read.id).collect();
+        assert_eq!(ids_with_neighbour, ids_on_its_own);
     }
 }

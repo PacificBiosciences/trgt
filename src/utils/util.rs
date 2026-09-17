@@ -2,6 +2,21 @@ use std::fmt::{Binary, Display};
 
 pub type Result<T> = std::result::Result<T, String>;
 
+/// Returns the FNV-1a hash of a run of bytes.
+///
+/// It is written out rather than taken from the standard library because the values it gives decide
+/// what a run writes and what a later run compares against, so they have to stay the same whatever
+/// version of Rust builds TRGT. The values are therefore part of what TRGT's output files mean, and
+/// the test below pins them.
+pub fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
 pub fn handle_error_and_exit(err: String) -> ! {
     log::error!("{}", err);
     std::process::exit(1);
@@ -139,5 +154,21 @@ mod tests {
             format_number_with_commas(isize::MIN),
             "-9,223,372,036,854,775,808"
         );
+    }
+
+    #[test]
+    fn fnv1a64_gives_the_values_trgt_output_files_are_written_with() {
+        // Changing these values would make TRGT refuse to resume every output file written before
+        // the change, and would hand every deep locus a different sample of its reads.
+        assert_eq!(fnv1a64(b""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a64(b"a"), 0xaf63_dc4c_8601_ec8c);
+        assert_eq!(fnv1a64(b"foobar"), 0x8594_4171_f739_67e8);
+    }
+
+    #[test]
+    fn fnv1a64_tells_different_bytes_apart() {
+        assert_ne!(fnv1a64(b"chr1:100-200:TR1"), fnv1a64(b"chr1:100-200:TR2"));
+        assert_ne!(fnv1a64(b"chr1:100-200:TR1"), fnv1a64(b"chr1:100-201:TR1"));
+        assert_eq!(fnv1a64(b"chr1:100-200:TR1"), fnv1a64(b"chr1:100-200:TR1"));
     }
 }

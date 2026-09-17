@@ -91,6 +91,22 @@ impl Karyotype {
         })
     }
 
+    /// Returns how the karyotype was given, as a single line that two runs can be compared on.
+    pub fn encoding(&self) -> String {
+        match &self.ploidy {
+            PloidyInfo::PresetXX => "XX".to_string(),
+            PloidyInfo::PresetXY => "XY".to_string(),
+            PloidyInfo::Custom(ploidies) => {
+                let mut entries: Vec<String> = ploidies
+                    .iter()
+                    .map(|(chrom, ploidy)| format!("{chrom}:{ploidy:?}"))
+                    .collect();
+                entries.sort();
+                entries.join(",")
+            }
+        }
+    }
+
     pub fn get_ploidy(&self, chrom: &str) -> Result<Ploidy> {
         match &self.ploidy {
             PloidyInfo::PresetXX => match chrom {

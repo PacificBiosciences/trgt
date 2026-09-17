@@ -8,7 +8,7 @@ use crate::trgt::{
     locus::Locus,
     reads::{AlleleAssign, LocusRead, SpanningRead},
 };
-use crate::utils::{Genotyper, Ploidy, Result};
+use crate::utils::{fnv1a64, Genotyper, Ploidy, Result};
 use itertools::Itertools;
 use rand::{seq::SliceRandom, SeedableRng};
 use std::collections::BTreeMap;
@@ -407,15 +407,6 @@ fn label_with_hmm(locus: &Locus, seqs: &[Vec<u8>]) -> Vec<Annotation> {
 }
 
 #[inline]
-fn fnv1a64(bytes: &[u8]) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;
-    for &b in bytes {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    h
-}
-
 pub fn deterministic_shuffle(reads: &mut [SpanningRead], locus_id: &str) {
     if reads.len() <= 1 {
         return;
