@@ -24,6 +24,7 @@ rust-htslib = { version = "0.50", default-features = false, features = [
     "curl",
     "s3",
     "gcs",
+    "libdeflate",
 ] }
 itertools = "0.14"
 env_logger = "0.11"

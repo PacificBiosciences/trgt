@@ -1017,6 +1017,15 @@
     "description": "Raw FFI bindings to platform libraries like libc."
   },
   {
+    "name": "libdeflate-sys",
+    "version": "1.26.1",
+    "authors": "Adam Kewley <contact@adamkewley.com>",
+    "repository": "https://github.com/libdeflater/libdeflater",
+    "license": "Apache-2.0",
+    "license_file": null,
+    "description": "Bindings to libdeflate for DEFLATE (de)compression exposed as non-streaming buffer\noperations. Contains bindings for raw deflate, zlib, and gzip data."
+  },
+  {
     "name": "libloading",
     "version": "0.8.9",
     "authors": "Simonas Kazlauskas <libloading@kazlauskas.me>",
